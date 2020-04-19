@@ -515,6 +515,7 @@ static int _tunToBuff( int i, Pipe * p ) {
 		        	}
 		        	p->unsend_count++;
 		        
+                                printf("debug[%s:%d]: p->unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count);
 		        	p->last_recv_seq = ph->x_seq;
     		            } 
 		    	    else {
@@ -779,7 +780,9 @@ int stream( int mode, Pipe * p, int fd ) {
 	    
 	    before_sz = p->tun2fd.sz;
             rt = getBytesToFd( &(p->tun2fd), p->fd );
-            printf("debug[%s:%d]: getBytesToFd write_sz=%lu rt=%d\n", __FILE__, __LINE__, want_sz, rt); 
+            printf("debug[%s:%d]: getBytesToFd write_sz=%lu\n", 
+			    __FILE__, __LINE__, 
+			    before_sz - p->tun2fd.sz); 
             switch ( rt ) {
                 case 0:  // socket block
                     printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
