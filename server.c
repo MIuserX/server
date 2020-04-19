@@ -458,7 +458,7 @@ int _destroy_pipe( Pipe * p, ForEpoll * ep ) {
             if ( _del_fd( ep, p->tun_list.tuns[j].fd ) ) {
 	        return -1;
 	    }
-            if ( delFd( &fd_list, p->tun_list.tuns[j].fd ) )
+            if ( delFd( &fd_list, p->tun_list.tuns[j].fd ) ) {
                 dprintf(2, "Error[%s:%d]: code error, delFd failed\n", __FILE__, __LINE__);
             }
         }

@@ -996,7 +996,7 @@ Pipe * searchPipeByKey( PipeList * pl, char * key) {
     }
 
     for ( i = 0; i < P_LIST_SZ; i++ ) {
-        if ( p->pipes[i].use && 0 == memcmp( (void *)(pl->pipes[i].key), (void *)key, P_KEY_SZ ) ) {
+        if ( pl->pipes[i].use && 0 == memcmp( (void *)(pl->pipes[i].key), (void *)key, P_KEY_SZ ) ) {
 	    //printf("==> searchPipeByKey i=%d\n", i);
 	    return pl->pipes + i;
 	}
