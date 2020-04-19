@@ -17,9 +17,11 @@
 #define B_FIN_SENT   3
 #define B_FIN_RECVED 4
 
-#define P_STAT_ACTIVE (31)
-#define P_STAT_ENDING (32)
-#define P_STAT_END    (33)
+#define P_STAT_ACTIVE  (31)
+#define P_STAT_ENDING  (32) // 等待数据发送完毕
+#define P_STAT_END     (33) // 已发送FIN
+#define P_STAT_ENDING1 (34) // 数据已发送完毕，可以发送FIN
+#define P_STAT_ENDING2 (35) // 正在发送FIN
 
 #define P_STREAM_BEGIN    (0)
 #define P_STREAM_BUFF2TUN (1)

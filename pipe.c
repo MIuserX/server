@@ -84,7 +84,7 @@ int hasUnSendAck( Pipe * p ) {
 
 int hasDataToTun( Pipe * p ) {
     assert( p != NULL );
-    return hasActiveData( &(p->fd2tun) ) || hasUnSendAck( p );
+    return hasActiveData( &(p->fd2tun) ) || hasUnSendAck( p ); 
 }
 
 static int cmp( void * a, void * b ) {
@@ -575,9 +575,12 @@ static int buffToTun( Pipe * p ) {
             switch ( p->tun_list.tuns[i].w_stat ) {
                 case TUN_W_INIT:
 		    printf("debug[%s:%d]: TUN_W_INIT\n", __FILE__, __LINE__);
-	            if ( ( ! hasDataToTun( p ) ) || p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) { 
+	            if ( ( ! hasDataToTun( p ) ) 
+			    && p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ 
+			    && p->stat != P_STAT_ENDING1 ) { 
 		        // 如果没有 active data 和 ack 可发就break
 			// 如果已发送且未收到ack的packet数大于P_PREV_SEND_MAXSZ就break
+			// 如果没有FIN需要发，就break
 			loop = 0;
 			break;
 		    }
@@ -610,6 +613,14 @@ static int buffToTun( Pipe * p ) {
                         }
                         packet_->head.sz += seg_sz;
 		        printf("debug[%s:%d]: packet - make other: x_seq=%u\n", __FILE__, __LINE__, packet_->head.x_seq); 
+		    }
+
+		    //== 发送FIN
+		    if ( !( packet_->head.flags & ACTION_PSH ) 
+			    && !( packet_->head.flags |= ACTION_ACK )
+		            && p->stat == P_STAT_ENDING ) {
+		        packet_->head.flags |= ACTION_FIN;
+			p->stat == P_STAT_ENDING2;
 		    }
     
                     //seg.head.checksum = ;
@@ -649,6 +660,10 @@ static int buffToTun( Pipe * p ) {
 			        p->last_recv_ack = usa.seq;
 			        removeFromLine( &(p->ack_sending_list), &usa, matchSeq );
 			    }
+			}
+
+                        if ( packet_->head.flags & ACTION_FIN ) {
+			    p->stat = P_STAT_END;
 			}
 
     		        cleanBuff( &(p->tun_list.tuns[i].w_seg) );

@@ -90,7 +90,6 @@ int epoll_init( int fd, ForEpoll * ep ) {
     ep->ev.events = EPOLLIN | EPOLLET;
     ep->ev.data.fd = fd;
     if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_ADD, fd, &(ep->ev) ) < 0 ) {
-        dprintf(2, "Epoll Error : %s\n", strerror(errno) );
         return -1;
     }
     ep->fd_count = 1;
