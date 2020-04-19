@@ -640,12 +640,12 @@ void * client_pthread( void * p ) {
 	    else {
 		if ( ep.evs[i].events & EPOLLIN ) {
                     printf("debug[%s:%d]: client fd %d: r event\n", __FILE__, __LINE__, ep.evs[i].data.fd );
-                    rt = stream( P_STREAM_FD2BUFF, p, ep.evs[i].data.fd );
+                    rt = stream( P_STREAM_FD2BUFF, &pp, ep.evs[i].data.fd );
                     switch ( rt ) {
 	                case 2: // socket closed
-                            if ( ! isBuffEmpty( &(p->tun2fd) ) ) {
-                                dprintf(2, "Error[%s:%d]: client fd %d closed, but tun2fd has data", __FILE__, __LINE__, p->fd);
-                                client_pthread_exit( -2, p, ep );
+                            if ( ! isBuffEmpty( &(pp.tun2fd) ) ) {
+                                dprintf(2, "Error[%s:%d]: client fd %d closed, but tun2fd has data", __FILE__, __LINE__, pp.fd);
+                                client_pthread_exit( -2, &pp, &ep );
 	                    }
                         case 0: // socket block
                             break;
@@ -653,9 +653,9 @@ void * client_pthread( void * p ) {
 	                case -1:// errors
                             dprintf(2, "Error[%s:%d]: mapping fd %d, errno=%d %s\n",
                                         __FILE__, __LINE__,
-                                        evt_fd,
+                                        ep.evs[i].data.fd,
                                         errno, strerror(errno));
-                            client_pthread_exit( -2, p, ep );
+                            client_pthread_exit( -2, &pp, &ep );
                     }
 		}
 	    }
