@@ -602,6 +602,7 @@ void * client_pthread( void * p ) {
 	        printf("Info[%s:%d]: auth to server failed\n", __FILE__, __LINE__ );
                 client_pthread_exit( -4, &pp, &ep );
 	    }
+	    continue;
 	}
 
         //== 碰到epoll事件就处理事件

@@ -431,7 +431,7 @@ int _del_fd( ForEpoll * ep, int fd ) {
     assert( fd >= 0 );
 
     if ( ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_DEL, fd, &(ep->ev) ) ) < 0 ) {
-        dprintf(2, "Error: epoll_ctl_del error, %s\n", strerror(errno));
+        dprintf(2, "Error[%s:%d]: epoll_ctl_del error, fd=%d errmsg=%s\n", __FILE__, __LINE__, fd, strerror(errno));
         return -1;
     }
     --(ep->fd_count);
