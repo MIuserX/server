@@ -819,15 +819,15 @@ int stream( int mode, Pipe * p, int fd ) {
             rt = tunToBuff( fd, p );
 	    printf("debug[%s:%d]: tunToBuff rt=%d\n", __FILE__, __LINE__, rt); 
             switch ( rt ) {
-		case 32: // end service
+		case 2: // end service
                     printf("Info[%s:%d]: end service\n", __FILE__, __LINE__); 
-		    return rt;
-                case 31: // buffer's remaining space maybe not enough
+		    return 32;
+                case 1: // buffer's remaining space maybe not enough
                     printf("debug[%s:%d]: buffer's remaining space maybe not enough\n", __FILE__, __LINE__); 
-	            return rt;
-                case 30: // socket block
+	            return 31;
+                case 0: // socket block
                     printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
-                    return rt;
+                    return 30;
                 case -1:// errors
                     printf("Error[%s:%d]: errors %d %s\n", __FILE__, __LINE__, errno, strerror(errno) ); 
 	            return rt;
