@@ -749,7 +749,8 @@ int stream( int mode, Pipe * p, int fd ) {
     assert( p != NULL );
     assert( mode > P_STREAM_BEGIN && mode < P_STREAM_END );
     assert( fd >= 0 );
-	
+    
+    printf("debug[%s:%d]: stream p=%p\n", __FILE__, __LINE__, p); 
     switch ( mode ) {
         case P_STREAM_FD2BUFF:
 	    // 这个模式下，就是把fd的数据读到buff里去
