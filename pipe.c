@@ -922,6 +922,8 @@ int getAEmptyPipe( PipeList * pl ) {
 	        return -2;
 	    }
 	    pl->pipes[i].use = 1;
+	    pl->sz++;
+	    printf("==> empty pipe i=%d\n", i);
 	    return i;
 	}
     }
