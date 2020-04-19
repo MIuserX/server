@@ -721,14 +721,14 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
     while ( 1 ) {
         switch ( fn->auth_status ) {
             case TUN_ACTIVE: // read auth packet
-                printf("debug: read auth packet => go\n");
+                printf("debug[%s:%d]: read auth packet => go\n", __FILE__, __LINE__);
                 while ( ! isBuffFull( &(fn->bf) ) ) {
                     want_sz = 0;
 		    rt = putBytesFromFd( &(fn->bf), fn->fd, &want_sz );
                     if ( isBuffFull( &(fn->bf) ) ) {
                         // buffer is full
             	        fn->auth_status = TUN_RECV_AP;
-                        printf("debug: read auth packet => ok\n");
+                        printf("debug[%s:%d]: read auth packet => ok\n", __FILE__, __LINE__);
                         break;
                     }
 
@@ -746,11 +746,12 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                 break;
             
             case TUN_RECV_AP: //==== auth
-                printf("debug: auth => go\n");
+                printf("debug: auth packet => go\n");
                 *ecode = 0;
                 ap = (AuthPacket *)(fn->bf.buff);
                 switch ( ap->code ) {
                     case AUTH_NEW:
+                        printf("debug[%s:%d]: new pipe, key=\"%16s\"\n", __FILE__, __LINE__, ap->key);
                         p = searchPipeByKey( pl, ap->key );
                         if ( p ) {
                             ap->code = (*ecode) = AUTH_KEY_USED;
@@ -759,9 +760,11 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
 			    idx = getAEmptyPipe( pl );
 			    if ( idx == -1 ) {
                                 ap->code = (*ecode) = AUTH_USR_FULL;
+                                printf("Error[%s:%d]: pipe list is full\n", __FILE__, __LINE__);
 			        return 2;
 			    }
-			    else {
+			    else if ( idx < 0 ) {
+                                printf("Error[%s:%d]: getAEmptyPipe return %d\n", __FILE__, __LINE__, idx);
 			        return -1;
 			    }
 			    new_p = pl->pipes + idx;
@@ -769,8 +772,6 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
 			    // 连接mapping addr
                             if ( ( rt = connectFd( new_p, mapping_addr ) ) != 0 ) {
 				delPipeByI( pl, idx );
-				new_p = NULL;
-				idx = -1;
                                 ap->code = (*ecode) = AUTH_SERV_ERR;
                                 dprintf(2, "Error[%s:%d]: connect mapping addr failed, errno=%d, %s\n", __FILE__, __LINE__, errno, strerror(errno));
 			        return 2;
@@ -784,9 +785,8 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                                 fdnode.p = new_p;
                                 if ( addFd( fd_list, &fdnode ) ) {
 				    delPipeByI( pl, idx );
-                                    new_p = NULL;
-				    idx = -1;
                                     ap->code = (*ecode) = AUTH_USR_FULL;
+                                    printf("Error[%s:%d]: fd list is full\n", __FILE__, __LINE__);
                                     return 2;
                                 }
 
@@ -794,16 +794,14 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                                 memcpy( (void *)(new_p->key), (void *)(ap->key), P_KEY_SZ );
                                 new_p->stat = P_STAT_ACTIVE;
 				joinTunList( &(new_p->tun_list), fn->fd );
+				fn->p = new_p;
 				printf("new_p=%p fn->p=%p\n", new_p, fn->p);
-				
-				new_p = NULL;
-				idx = -1;
                             }
                         }
                         break;
 
                     case AUTH_JOIN:
-                        printf("debug[%s:%d]: join pipe, key=%36s\n", __FILE__, __LINE__, ap->key);
+                        printf("debug[%s:%d]: join pipe, key=\"%16s\"\n", __FILE__, __LINE__, ap->key);
                         p = searchPipeByKey( pl, ap->key );
                         if ( ! p ) {
                             ap->code = (*ecode) = AUTH_NO_KEY;
