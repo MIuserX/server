@@ -389,6 +389,14 @@ static void _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	        p->stat = P_STAT_ENDING;
 	    }
         }
+
+        printf("debug[%s:%d]: why not ENDING ?\n", __FILE__, __LINE__ );
+        printf("debug[%s:%d]: fd2tun:\n", __FILE__, __LINE__ );
+	dumpBuff( &(p->fd2tun) );
+        printf("debug[%s:%d]: unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count );
+        printf("debug[%s:%d]: sending_count=%d\n", __FILE__, __LINE__, p->tun_list.sending_count );
+        printf("debug[%s:%d]: buff2segs.len=%d\n", __FILE__, __LINE__, p->buff2segs.len );
+
 	
         if ( rw == 'r' ) { // client fd met read event
             /* 尽力把client fd读到block。
