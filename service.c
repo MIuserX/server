@@ -395,7 +395,7 @@ static void _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	dumpBuff( &(p->fd2tun) );
         printf("debug[%s:%d]: unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count );
         printf("debug[%s:%d]: sending_count=%d\n", __FILE__, __LINE__, p->tun_list.sending_count );
-        printf("debug[%s:%d]: buff2segs.len=%d\n", __FILE__, __LINE__, p->buff2segs.len );
+        printf("debug[%s:%d]: buff2segs.len=%d\n", __FILE__, __LINE__, p->fd2tun.buff2segs.len );
 
 	
         if ( rw == 'r' ) { // client fd met read event
