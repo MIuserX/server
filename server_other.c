@@ -4,12 +4,30 @@
 #include <errno.h>
 #include <time.h>
 #include <assert.h>
+#include <unistd.h>
 
 #include "server.h"
 #include "tunnel.h"
 
 void initFdList( FdList * fl ) {
-    bzero( (void *)fl, sizeof(fl) * MAX_FDS );
+    assert( fl != NULL );
+    bzero( (void *)fl, sizeof(fl) );
+    bzero( (void *)(fl->fds), sizeof(FdNode) * MAX_FDS );
+}
+
+void destroyFdList( FdList * fl ) {
+    int i;
+
+    assert( fl != NULL );
+
+    for ( i = 0; i < MAX_FDS; i++ ) {
+        if ( fl->fds[i].use ) { 
+	    if ( fl->fds[i].fd != -1 ) {
+    	        close( fl->fds[i].fd );
+	    }
+	    fl->fds[i].use = 0;
+	}
+    }
 }
 
 /* 
@@ -60,6 +78,7 @@ int delFd( FdList * fl, int fd ) {
 
     for ( i = 0; i < MAX_FDS; i++ ) {
         if ( fl->fds[i].fd == fd && fl->fds[i].use != 0 ) {
+	    close( fd );
             bzero( (void *)(fl->fds + i), sizeof(FdNode) );
             fl->sz -= 1;
 	    return 0;

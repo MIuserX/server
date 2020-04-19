@@ -1,7 +1,6 @@
 #ifndef __SERVER_H__
 #define __SERVER_H__
 
-#include <stdint.h>
 #include <netinet/in.h>            /* socket类定义需要*/
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -23,15 +22,13 @@
 
 
 typedef struct fd_node {
-    int        use;     // if this node is use: 
+    int        use; // if this node is use: 
                     //    0     -> not used
 		    //    non-0 -> used
                     // only if use != 0, the following attrs are effort
 
     int        fd;       // file descripter
     char       type;     // fd type
-    char       epollout; // 'y': in epollout
-                         // 'n': not in epollout
     unsigned int flags;    
 
     Buffer     bf;
@@ -50,6 +47,7 @@ typedef struct fd_list {
 } FdList;
 
 void initFdList( FdList * fl );
+void destroyFdList( FdList * fl );
 
 int isFdListEmpty( FdList * fl );
 int isFdListFull( FdList * fl );
@@ -61,17 +59,6 @@ int cleanAuthTimeout( FdList * fl, int );
 int typeOfFd( FdList * fl, int fd );
 FdNode * searchByFd( FdList * fl, int fd );
 
-/*typedef struct ForEpoll {
-    int                epoll_fd;
-    int                wait_fds;
-    struct epoll_event ev;
-    struct epoll_event evs[MAXEPOLL];
-    int                fd_count;  // 当前已经存在的数量
-} ForEpoll;
-
-void initForEpoll( ForEpoll * );
-void destroyForEpoll( ForEpoll * );
-*/
 int epoll_init( int fd, ForEpoll * ep );
 void * service_thread(void * arg);
 

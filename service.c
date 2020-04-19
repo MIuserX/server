@@ -740,7 +740,6 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
 				fdnode.use = 1;
                                 fdnode.fd = new_p->fd;
                                 fdnode.type = FD_MERGE1;
-				fdnode.epollout = 'n';
                                 fdnode.t = time( NULL );
                                 fdnode.p = new_p;
                                 if ( addFd( fd_list, &fdnode ) ) {
