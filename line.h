@@ -56,6 +56,7 @@ int getNode( Line * l, void ** data, int (*match)(void * data, void * target), v
  * data : 要存储的数据的指针 
  */
 int outLine( Line * l, void * data );
+int justOutLine( Line * l );
 
 
 #endif

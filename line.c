@@ -5,8 +5,6 @@
 
 #include "line.h"
 
-int _outLine( Line * l );
-
 void initLine( Line * l ) {
     assert( l != NULL );
 
@@ -17,7 +15,7 @@ void destroyLine( Line * l ) {
     assert( l != NULL );
 
     while ( ! isLineEmpty( l ) ) {
-	_outLine( l );
+	justOutLine( l );
     }
 }
 
@@ -267,7 +265,7 @@ void * getHeadPtr( Line * l ) {
     return l->head->data;
 }
 
-int _outLine( Line * l ) {
+int justOutLine( Line * l ) {
     assert( l != NULL );
 
     if ( isLineEmpty( l ) ) {
