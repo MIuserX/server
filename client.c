@@ -41,8 +41,9 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in serv_addr; // server 地址结构
     struct sockaddr_in cliaddr;   // client 地址结构
     socklen_t          len = sizeof( struct sockaddr_in );
-    Pipe               pp;
     pthread_t          tid;
+    
+    CTArg            * ctarg;
 
     //==== 设置server addr
     memset(&serv_addr, 0, sizeof(serv_addr)); //每个字节都用0填充
@@ -61,33 +62,39 @@ int main(int argc, char *argv[]) {
             dprintf( 2, "Error: accept:%s\n", strerror( errno ) );
             exit( EXIT_FAILURE );
         }
-        printf("info[%s:%d]: client: %s:%d\n", __FILE__, __LINE__, inet_ntoa(cliaddr.sin_addr), cliaddr.sin_port );
- 
+	printf("info[%s:%d]: client: %s:%d\n", __FILE__, __LINE__, inet_ntoa(cliaddr.sin_addr), cliaddr.sin_port );
+
+        ctarg = (CTArg *)malloc( sizeof(CTArg) );
+	if ( ! ctarg ) {
+            dprintf( 2, "Error: no memory:%s\n", strerror( errno ) );
+            exit( EXIT_FAILURE );
+	}
+
 	//== 将 fd 加入 fd_list and create a pipe to server
-	if ( initPipe( &pp, P_BUFF_SZ, cli_conf.ntun ) ) {
+	if ( initPipe( &(ctarg->p), P_BUFF_SZ, cli_conf.ntun ) ) {
             close(cli_fd);
             dprintf( 2, "Error: no memory: %s\n", strerror(errno) );
 	    continue;
 	}
-	createKey( pp.key );
-	pp.fd = cli_fd;
-	pp.stat = P_STAT_ACTIVE;
+	createKey( ctarg->p.key );
+	ctarg->p.fd = cli_fd;
+	ctarg->p.stat = P_STAT_ACTIVE;
 
 	//== 
 	printf("debug[%s:%d]: active tunnels\n", __FILE__, __LINE__);
-        if ( activeTunnels( &(pp.tun_list) , serv_addr, cli_conf.nic_list ) ) {
+        if ( activeTunnels( &(ctarg->p.tun_list) , serv_addr, cli_conf.nic_list ) ) {
             close(cli_fd);
             dprintf( 2, "Error: active tunnels failed: %s\n", strerror(errno) );
-	    destroyPipe( &pp );
+	    destroyPipe( &(ctarg->p) );
 	    continue;
 	}
 
 	//== 
 	printf("debug[%s:%d]: create pthread\n", __FILE__, __LINE__);
-        if ( ( rt = pthread_create( &tid, NULL, client_pthread, &pp ) ) != 0 ) {
+        if ( ( rt = pthread_create( &tid, NULL, client_pthread, ctarg ) ) != 0 ) {
             close(cli_fd);
             dprintf( 2, "Error: pthread_create failed, rt=%d\n", rt );
-	    destroyPipe( &pp );
+	    destroyPipe( &(ctarg->p) );
 	    continue;
 	}
     }

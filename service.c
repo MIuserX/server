@@ -15,6 +15,7 @@
 #include "pipe.h"
 #include "auth.h"
 #include "server.h"
+#include "service.h"
 
 static int _authToServer( Tunnel * , int *, int , Pipe * );
 
@@ -183,6 +184,7 @@ static int _authToServer( Tunnel * t, int * ecode, int type, Pipe * p ) {
 static void client_pthread_exit( int rt, Pipe * p, ForEpoll * ep ) {
     destroyForEpoll( ep );
     destroyPipe( p );
+    free( p );
     pthread_exit( (void *)(&rt) );
 }
 
@@ -584,45 +586,47 @@ void * client_pthread( void * p ) {
     int      auth_ok = 0;
     int      ecode = 0;
     int      timeout = 0;
-    Pipe     pp;
+    Pipe   * pp;
+    CTArg  * ctarg;
 
     assert( p != NULL );
 
-    pp = *( (Pipe *)p );
+    ctarg = p;
+    pp = &(ctarg->p);
 
     initForEpoll( &ep );
 
     // 设置 non-blocking
-    if ( setnonblocking( pp.fd ) ) {
+    if ( setnonblocking( pp->fd ) ) {
         dprintf(2, "Error[%s:%d]: set nonblocking failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-        client_pthread_exit( -5, &pp, &ep );
+        client_pthread_exit( -5, pp, &ep );
     }
 
     // 创建epoll
     ep.epoll_fd = epoll_create( TUN_LIST_SZ + 1 );
     if ( ep.epoll_fd == -1 ) {
         dprintf(2, "Error[%s:%d]: epoll_create failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-        client_pthread_exit( -4, &pp, &ep );
+        client_pthread_exit( -4, pp, &ep );
     }
 
     // 将 client fd 加入epoll
     ep.ev.events = EPOLLIN | EPOLLET;
-    ep.ev.data.fd = pp.fd;
-    if ( epoll_ctl( ep.epoll_fd, EPOLL_CTL_ADD, pp.fd, &(ep.ev) ) < 0 ) {
+    ep.ev.data.fd = pp->fd;
+    if ( epoll_ctl( ep.epoll_fd, EPOLL_CTL_ADD, pp->fd, &(ep.ev) ) < 0 ) {
         dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-        client_pthread_exit( -2, &pp, &ep );
+        client_pthread_exit( -2, pp, &ep );
     }
     ep.fd_count = 1;
 
     // 将 tunnels 的 fd 加入epoll
-    for ( i = 0; i < pp.tun_list.len; i++ ) {
+    for ( i = 0; i < pp->tun_list.len; i++ ) {
         ep.ev.events = EPOLLIN | EPOLLET;
-        ep.ev.data.fd = pp.tun_list.tuns[i].fd;
-        if ( epoll_ctl( ep.epoll_fd, EPOLL_CTL_ADD, pp.tun_list.tuns[i].fd, &(ep.ev) ) < 0 ) {
+        ep.ev.data.fd = pp->tun_list.tuns[i].fd;
+        if ( epoll_ctl( ep.epoll_fd, EPOLL_CTL_ADD, pp->tun_list.tuns[i].fd, &(ep.ev) ) < 0 ) {
 	    // 如果某个 tunnel socket fd 操作失败，
 	    // close 之前所有的 tunnels socket fd 和 epoll fd。
             dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-            client_pthread_exit( -2, &pp, &ep );
+            client_pthread_exit( -2, pp, &ep );
         }
         ++ep.fd_count;
     }
@@ -633,7 +637,7 @@ void * client_pthread( void * p ) {
         printf("debug[%s:%d]: epoll_wait...\n", __FILE__, __LINE__ );
         if ( ( ep.wait_fds = epoll_wait( ep.epoll_fd, ep.evs, ep.fd_count, -1 ) ) == -1 ) {
             dprintf( 2, "Epoll Wait Error: %s\n", strerror( errno ) );
-            client_pthread_exit( -3, &pp, &ep );
+            client_pthread_exit( -3, pp, &ep );
         }
         printf("debug[%s:%d]: epoll_wait events: count=%d\n", __FILE__, __LINE__, ep.wait_fds );
 
@@ -641,7 +645,7 @@ void * client_pthread( void * p ) {
 	if ( ! auth_ok ) {
             printf("debug[%s:%d]: auth to server\n", __FILE__, __LINE__ );
 	    ecode = 0;
-            rt = authToServer( &pp, &ecode );
+            rt = authToServer( pp, &ecode );
             if ( rt == 2 ) { // auth ok
 	        auth_ok = 1;
                 printf("Info[%s:%d]: auth to server success\n", __FILE__, __LINE__ );
@@ -651,7 +655,7 @@ void * client_pthread( void * p ) {
 		;
             } else {
 	        printf("Info[%s:%d]: auth to server failed\n", __FILE__, __LINE__ );
-                client_pthread_exit( -4, &pp, &ep );
+                client_pthread_exit( -4, pp, &ep );
 	    }
 	}
 
@@ -661,7 +665,7 @@ void * client_pthread( void * p ) {
             printf("debug[%s:%d]: loop[%d] fd=%d\n", __FILE__, __LINE__, i, ep.evs[i].data.fd );
             // 传递数据
             if ( auth_ok ) {
-                if ( ep.evs[i].data.fd == pp.fd ) {
+                if ( ep.evs[i].data.fd == pp->fd ) {
 		    /*
 		     * 如果 client fd 有了 read事件，就 fd2tun。
 		     * 如果 client fd 有了write事件，就 tun2fd。
@@ -670,36 +674,36 @@ void * client_pthread( void * p ) {
 		     */
 		    if ( ep.evs[i].events & EPOLLIN ) {
                         printf("debug[%s:%d]: merge fd r event\n", __FILE__, __LINE__ );
-	                _relay_fd_to_tun( &pp, ep.evs[i].data.fd, &ep, 'r' );
+	                _relay_fd_to_tun( pp, ep.evs[i].data.fd, &ep, 'r' );
 		    }
 		    if ( ep.evs[i].events & EPOLLOUT ) {
                         printf("debug[%s:%d]: merge fd w event\n", __FILE__, __LINE__ );
-	                _relay_tun_to_fd( &pp, ep.evs[i].data.fd, &ep, 'w' );
+	                _relay_tun_to_fd( pp, ep.evs[i].data.fd, &ep, 'w' );
 		    }
 	        }
 	        else {
 		    if ( ep.evs[i].events & EPOLLIN ) {
                         printf("debug[%s:%d]: tunnel fd r event\n", __FILE__, __LINE__ );
-	                _relay_tun_to_fd( &pp, ep.evs[i].data.fd, &ep, 'r' );
+	                _relay_tun_to_fd( pp, ep.evs[i].data.fd, &ep, 'r' );
 		    }
 		    if ( ep.evs[i].events & EPOLLOUT ) {
                         printf("debug[%s:%d]: tunnel fd w event\n", __FILE__, __LINE__ );
-	                _relay_fd_to_tun( &pp, ep.evs[i].data.fd, &ep, 'w' );
+	                _relay_fd_to_tun( pp, ep.evs[i].data.fd, &ep, 'w' );
 		    }
 	        }
 	    }
 	    else {
-                if ( ep.evs[i].data.fd == pp.fd ) {
+                if ( ep.evs[i].data.fd == pp->fd ) {
 		    if ( ep.evs[i].events & EPOLLIN ) {
                         printf("debug[%s:%d]: merge fd %d: r event\n", __FILE__, __LINE__, ep.evs[i].data.fd );
-                        rt = stream( P_STREAM_FD2BUFF, &pp, ep.evs[i].data.fd );
+                        rt = stream( P_STREAM_FD2BUFF, pp, ep.evs[i].data.fd );
                         printf("debug[%s:%d]: not auth ok, read data\n", __FILE__, __LINE__);
-		        dumpBuff( &(pp.fd2tun) );
+		        dumpBuff( &(pp->fd2tun) );
                         switch ( rt ) {
 	                    case 2: // socket closed
-                                if ( ! isBuffEmpty( &(pp.tun2fd) ) ) {
-                                    dprintf(2, "Error[%s:%d]: client fd %d closed, but tun2fd has data", __FILE__, __LINE__, pp.fd);
-                                    client_pthread_exit( -2, &pp, &ep );
+                                if ( ! isBuffEmpty( &(pp->tun2fd) ) ) {
+                                    dprintf(2, "Error[%s:%d]: client fd %d closed, but tun2fd has data", __FILE__, __LINE__, pp->fd);
+                                    client_pthread_exit( -2, pp, &ep );
 	                        }
                             case 0: // socket block
                                 break;
@@ -709,11 +713,11 @@ void * client_pthread( void * p ) {
                                             __FILE__, __LINE__,
                                             ep.evs[i].data.fd,
                                             errno, strerror(errno));
-                                client_pthread_exit( -2, &pp, &ep );
+                                client_pthread_exit( -2, pp, &ep );
                         }
 
-			if ( ! isBuffEmpty( &(pp.fd2tun) ) ) {
-			    _set_tun_out_listen( &pp, &ep, TRUE, TRUE );
+			if ( ! isBuffEmpty( &(pp->fd2tun) ) ) {
+			    _set_tun_out_listen( pp, &ep, TRUE, TRUE );
 			}
 		    }
 		}
@@ -721,14 +725,14 @@ void * client_pthread( void * p ) {
 	}
 
 	//== 看 pipe 是否要终结
-	if ( pp.stat == P_STAT_END ) {
+	if ( pp->stat == P_STAT_END ) {
 	    sleep( P_END_WAIT_SEC );
-            printf("Info[%s:%d]: pipe[%8s] end\n", __FILE__, __LINE__, pp.key );
+            printf("Info[%s:%d]: pipe[%8s] end\n", __FILE__, __LINE__, pp->key );
 	    break;
 	}
     }
 
-    client_pthread_exit( 0, &pp, &ep );
+    client_pthread_exit( 0, pp, &ep );
 }
 
 
