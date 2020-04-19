@@ -32,6 +32,7 @@ struct {
     10082,
     "127.0.0.1",
     10087
+    //5432
 };
 
 /*
@@ -473,25 +474,34 @@ int _del_fd( ForEpoll * ep, int fd ) {
 int _destroy_pipe( Pipe * p, ForEpoll * ep ) {
     int j;
     assert( p != NULL );
+        
+    printf("Info[%s:%d]: pipe[%16s] end\n", __FILE__, __LINE__, p->key);
 
+    printf("debug[%s:%d]: clean merge fd %d\n", __FILE__, __LINE__, p->fd);
     if ( _del_fd( ep, p->fd ) ) {
         return -1;
     }
     if ( delFd( &fd_list, p->fd ) ) {
-        dprintf(2, "Error[%s:%d]: code error, delFd failed\n", __FILE__, __LINE__);
+        dprintf(2, "Error[%s:%d]: code error, delFd failed\n", 
+			__FILE__, __LINE__);
     }
     
     for ( j = 0; j < p->tun_list.len; j++ ) {
         if ( p->tun_list.tuns[j].fd != -1 ) {
+            printf("debug[%s:%d]: clean tunnel fd %d\n", 
+			    __FILE__, __LINE__, 
+			    p->tun_list.tuns[j].fd);
             if ( _del_fd( ep, p->tun_list.tuns[j].fd ) ) {
 	        return -1;
 	    }
             if ( delFd( &fd_list, p->tun_list.tuns[j].fd ) ) {
-                dprintf(2, "Error[%s:%d]: code error, delFd failed\n", __FILE__, __LINE__);
+                dprintf(2, "Error[%s:%d]: code error, delFd failed\n", 
+				__FILE__, __LINE__);
             }
         }
     }
     
+    printf("debug[%s:%d]: delete pipe\n", __FILE__, __LINE__);
     if ( delPipeByKey( &plist, p->key ) ) {
         dprintf(2, "Error[%s:%d]: code error, delPipe failed\n", __FILE__, __LINE__);
     }
@@ -633,8 +643,14 @@ void main_loop( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
 	            }
 		}
 	    }
-
         }
+
+	//====
+	for ( i = 0; i < P_LIST_SZ; i++ ) {
+	    if ( plist.pipes[i].stat == P_STAT_END ) {
+	        _destroy_pipe( plist.pipes + i, &ep );
+	    }
+	}
     }
 }
 
