@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <errno.h>
 #include <assert.h>
 #include <unistd.h>
@@ -721,6 +722,7 @@ void * client_pthread( void * p ) {
 
 	//== 看 pipe 是否要终结
 	if ( pp.stat == P_STAT_END ) {
+	    sleep( P_END_WAIT_SEC );
             printf("Info[%s:%d]: pipe[%8s] end\n", __FILE__, __LINE__, pp.key );
 	    break;
 	}

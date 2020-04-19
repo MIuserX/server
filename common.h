@@ -38,6 +38,8 @@
 #define FD_READ_BLOCK   (0x00000020) // fd遭遇read block
 #define FD_WRITE_BLOCK  (0x00000040) // fd遭遇write block
 
+#define P_END_WAIT_SEC (1)
+
 typedef struct ForEpoll {
     int                epoll_fd;
     int                wait_fds;
