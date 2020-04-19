@@ -449,17 +449,24 @@ int _destroy_pipe( Pipe * p, ForEpoll * ep ) {
     if ( _del_fd( ep, p->fd ) ) {
         return -1;
     }
-    delFd( &fd_list, p->fd );
+    if ( delFd( &fd_list, p->fd ) ) {
+        dprintf(2, "Error[%s:%d]: code error, delFd failed\n", __FILE__, __LINE__);
+    }
+    
     for ( j = 0; j < p->tun_list.len; j++ ) {
         if ( p->tun_list.tuns[j].fd != -1 ) {
             if ( _del_fd( ep, p->tun_list.tuns[j].fd ) ) {
 	        return -1;
 	    }
-            delFd( &fd_list, p->tun_list.tuns[j].fd );
+            if ( delFd( &fd_list, p->tun_list.tuns[j].fd ) )
+                dprintf(2, "Error[%s:%d]: code error, delFd failed\n", __FILE__, __LINE__);
+            }
         }
     }
     
-    destroyPipe( p );
+    if ( delPipeByKey( &plist, p->key ) ) {
+        dprintf(2, "Error[%s:%d]: code error, delPipe failed\n", __FILE__, __LINE__);
+    }
 
     return 0;
 }
