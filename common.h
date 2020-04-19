@@ -30,13 +30,13 @@
 #define P_PREV_SEND_MAXSZ (3)
 #define P_PREV_RECV_MAXSZ (2)
 
-#define FD_HAS_UNWRITE  (0x00000001)
-#define FD_HAS_UNREAD   (0x00000002)
-#define FD_IS_EPOLLLT   (0x00000004)
-#define FD_IS_EPOLLOUT  (0x00000008)
-//#define FD_HAS_EPOLLOUT (0x00000010)
-//#define FD_HAS_EPOLLOUT (0x00000020)
-//#define FD_HAS_EPOLLOUT (0x00000040)
+#define FD_HAS_UNWRITE  (0x00000001) // (废弃)
+#define FD_HAS_UNREAD   (0x00000002) // (废弃)
+#define FD_IS_EPOLLLT   (0x00000004) // (废弃)fd 处于EPOLLLT模式
+#define FD_IS_EPOLLOUT  (0x00000008) // fd 处于监听EPOLLOUT状态
+#define FD_CLOSED       (0x00000010) // fd closed
+#define FD_READ_BLOCK   (0x00000020) // fd遭遇read block
+#define FD_WRITE_BLOCK  (0x00000040) // fd遭遇write block
 
 typedef struct ForEpoll {
     int                epoll_fd;
