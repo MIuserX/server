@@ -519,10 +519,13 @@ void main_loop( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
 		    case -3: // failed to allocate memory
 		    case -2: // (read) peer closed fd
 		    case -1: // read/write socket error
-		       dprintf(2, "Error: auth error: %s\n", strerror(errno));
+		       dprintf(2, "Error[%s:%d]: auth error: %s\n", 
+				       __FILE__, __LINE__, 
+				       strerror(errno));
 		       fd = fd_node->fd;
 		       if ( _del_fd( &ep, fd ) ) {
-		           dprintf(2, "Error: epoll_ctl_del error, %s\n", strerror(errno));
+		           dprintf(2, "Error[%s:%d]: epoll_ctl_del error, %s\n", 
+					   __FILE__, __LINE__, strerror(errno));
 		       }
 		       delFd( &fd_list, fd_node->fd );
 		       printf("debug: fd %d has been deleted\n", fd);
