@@ -916,7 +916,7 @@ int addPipe( PipeList * pl, Pipe * p, Pipe ** rt ) {
     
     for ( i = 0; i < P_LIST_SZ ; i++ ) {
 	// get a white seat, store the data in it, then break
-        if ( ! (pl->pipes[i].use) ) {
+        if ( !( pl->pipes[i].use ) ) {
 	    pl->pipes[i] = ( *p );
 	    pl->pipes[i].use = 1;
 	    pl->sz += 1;
@@ -935,7 +935,7 @@ int addPipe( PipeList * pl, Pipe * p, Pipe ** rt ) {
  * == return ==
  *  0: deleted
  * -1: list is emtpy
- * -2: fn's pipe not found
+ * -2: not found
  */
 int delPipeByKey( PipeList * pl, char * key ) {
     int i;
@@ -996,7 +996,7 @@ Pipe * searchPipeByKey( PipeList * pl, char * key) {
     }
 
     for ( i = 0; i < P_LIST_SZ; i++ ) {
-        if ( 0 == memcmp( (void *)(pl->pipes[i].key), (void *)key, P_KEY_SZ ) ) {
+        if ( p->pipes[i].use && 0 == memcmp( (void *)(pl->pipes[i].key), (void *)key, P_KEY_SZ ) ) {
 	    //printf("==> searchPipeByKey i=%d\n", i);
 	    return pl->pipes + i;
 	}
