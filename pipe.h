@@ -22,13 +22,11 @@
 #define P_STAT_END    (33)
 
 #define P_STREAM_BEGIN    (0)
-#define P_STREAM_FD2TUN   (1)
-#define P_STREAM_TUN2FD   (2)
+#define P_STREAM_BUFF2TUN (1)
+#define P_STREAM_BUFF2FD  (2)
 #define P_STREAM_TUN2BUFF (3)
 #define P_STREAM_FD2BUFF  (4)
-#define P_STREAM_BUFF2TUN (5)
-#define P_STREAM_BUFF2FD  (6)
-#define P_STREAM_END      (7)
+#define P_STREAM_END      (5)
 
 //#define P_SEG_HEAD  (1) //正在读packet的head
 //#define P_SEG_DATA  (2) //正在读packet的data
@@ -55,8 +53,8 @@ typedef struct pipe {
     time_t       fd_t;
     
     TunList      tun_list;      // pipe 的另一端是多个 fd
-    unsigned int tun_flags;
     time_t       tun_t;
+    char         tun_closed;
 
     Buffer       fd2tun;
     Buffer       tun2fd;

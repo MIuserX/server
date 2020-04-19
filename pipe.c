@@ -49,6 +49,7 @@ int initPipe( Pipe * p, size_t sz, int ntun ) {
     initLine( &(p->ack_sending_list) );
 
     p->fd = -1;
+    p->tun_closed = 'n';
     p->last_send_seq = -1;
     p->last_send_ack = -1;
     p->last_recv_seq = -1;
@@ -207,14 +208,15 @@ static int _tunToBuff( int , Pipe * );
  *   (2) 向tun2fd转移数据卡住
  *
  * == return ==
+ *  2: end service
  *  1: buffer not enough
  *  0: socket block
- * -1: 出错
+ * -1: errors
  */
 static int tunToBuff( int evt_fd, Pipe * p ) {
-    int i;  // loop variable
-    int rt; // ret of function
-    int ret = 1;
+    int       i;  // loop variable
+    int       rt; // ret of function
+    int       ret = 1;
     size_t    want_sz;
     UnSendAck usa;
     Packet *  pkt;
@@ -227,33 +229,55 @@ static int tunToBuff( int evt_fd, Pipe * p ) {
         if ( p->tun_list.tuns[i].status == TUN_AUTHED && 
 		p->tun_list.tuns[i].fd == evt_fd ) {
 	    rt = _tunToBuff( i, p );
+            
+	    if ( rt == 2 ) {
+	        for ( i = 0; i < p->tun_list.len; i++ ) {
+		    p->tun_list.tuns[i].status = TUN_CLOSED;
+		}
+	    }
+
+	    if ( rt > -1 ) {
+	        ret = rt;
+		break;
+	    }
+	    else {
+	        return -1;
+	    }
+	    /*
 	    switch ( rt ) {
+		case 2:
+		    ret = 2
+	            break;
+
 		case 1:
-		    p->tun_list.tuns[i].flags |= FD_HAS_UNREAD;
+		    // buffer空间不足
 		    ret = 1;
+		    break;
+
 		case 0:
 		    // socket block
 		    // 这时已经将读事件耗尽，可以返回。
-		    p->tun_list.tuns[i].flags &= ( ~FD_HAS_UNREAD );
 		    ret = 0;
 		    break;
+
 		default:
 		    return -1;
 		    break;
-	    }
+	    }*/
 	}
     }
 
     //==== 尝试转移seq靠后的包
     if ( p->prev_seglist.len > 0 ) {
-        printf("debug[%s:%d]: 将prev_seglist的数据向buffer转移\n",  __FILE__, __LINE__);
-	
+        printf("debug[%s:%d]: 存在提前收到靠后的packet\n",  __FILE__, __LINE__);
 	pkt = (Packet *)getHeadPtr( &(p->prev_seglist) );
-        if ( ( p->tun2fd.len - p->tun2fd.sz ) >= ( pkt->head.sz - PACKET_HEAD_SZ ) ) {
+        if ( pkt->head.x_seq == p->last_recv_seq + 1 && 
+		( p->tun2fd.len - p->tun2fd.sz ) >= ( pkt->head.sz - PACKET_HEAD_SZ ) ) {
             /* 如果 tun2fd 的 buffer 剩余空间够，就转移packet数据，
              * 如果不够，这次就不转移了。
              * 主要是保证不卡在转移数据上。
              */
+            printf("debug[%s:%d]: 提前收到的靠后的packet可以向buffer转移\n",  __FILE__, __LINE__);
             want_sz = pkt->head.sz - PACKET_HEAD_SZ;
             rt = putBytes( &(p->tun2fd), pkt->data, &want_sz );
             if ( rt ==  0 ) {
@@ -276,6 +300,7 @@ static int tunToBuff( int evt_fd, Pipe * p ) {
                 return -1;
             }
         }
+        printf("debug[%s:%d]: 提前收到的靠后的packet无法向buffer转移\n",  __FILE__, __LINE__);
     }
 
     return ret;
@@ -286,6 +311,7 @@ static int tunToBuff( int evt_fd, Pipe * p ) {
  * 当tunnels的fd有了读事件才会调用这函数。
  *
  * == return ==
+ *  2: end service
  *  1: buffer remaining space maybe not enough
  *  0: socket block
  * -1: socket closed
@@ -309,6 +335,10 @@ static int _tunToBuff( int i, Pipe * p ) {
 		 *
 		 *
 		 */
+                if ( p->tun_list.tuns[i].status == TUN_CLOSED ) {
+		    return 2;
+		}
+
                 if ( ( p->tun2fd.len - p->tun2fd.sz ) < ( PACKET_MAX_SZ - PACKET_HEAD_SZ ) ) {
                     return 1;
                 }
@@ -334,7 +364,11 @@ static int _tunToBuff( int i, Pipe * p ) {
 
 	        if ( PACKET_HEAD_SZ == p->tun_list.tuns[i].r_seg.sz ) {
     	            ph = ( PacketHead *)( p->tun_list.tuns[i].r_seg.buff);
-    	            if ( PACKET_HEAD_SZ == ph->sz ) {
+    	            if ( ph->flags & ACTION_FIN ) {
+                        p->tun_list.tuns[i].status = TUN_CLOSED;
+                        p->tun_list.tuns[i].r_stat = TUN_R_INIT;
+		    }
+		    else if ( PACKET_HEAD_SZ == ph->sz ) {
     	                // 如果仅仅是个ack包
                         printf("debug[%s:%d]: 读取完PacketHead，仅ACK：\n",  __FILE__, __LINE__);
                         dumpPacket( (Packet *)(p->tun_list.tuns[i].r_seg.buff) );
@@ -519,17 +553,16 @@ static int _tunToBuff( int i, Pipe * p ) {
  * (2) 
  *
  * == return ==
- *   1: 减少了tun2fd的bytes数
- *   0: 未减少tun2fd的bytes数
+ *   1: 还有发送能力
+ *   0: 所有socket 遭遇write block 或到了发送上限
  *  -1: errors
  */
 static int buffToTun( Pipe * p ) {
-    int      rt;
-    int      i;
-    int      loop = 1;
-    int      ret = 0;
-    Packet * packet_;
-    size_t   seg_sz;
+    int         rt;
+    int         i;
+    int         loop = 1;
+    Packet *    packet_;
+    size_t      seg_sz;
     UnSendAck * usap;
     UnSendAck   usa;
 
@@ -537,6 +570,7 @@ static int buffToTun( Pipe * p ) {
 
     // 把每个tunnel fd的发送状态都推进一遍
     for ( i = 0; i < p->tun_list.len; i++ ) {
+	loop = 1;
 	while ( loop ) {
             switch ( p->tun_list.tuns[i].w_stat ) {
                 case TUN_W_INIT:
@@ -567,7 +601,7 @@ static int buffToTun( Pipe * p ) {
 		    //== 组装ACTION_PSH和x_seq
 		    if ( hasActiveData( &(p->fd2tun) ) ) { 
                         packet_->head.flags |= ACTION_PSH;
-                        packet_->head.x_seq = ( ++p->last_send_seq );
+                        packet_->head.x_seq = ( ++(p->last_send_seq) );
     
                         seg_sz = PACKET_DATA_SZ;
                         rt = preGetBytes( &(p->fd2tun), packet_->data, &seg_sz, packet_->head.x_seq ); 
@@ -575,7 +609,6 @@ static int buffToTun( Pipe * p ) {
 		            return -1;
                         }
                         packet_->head.sz += seg_sz;
-			ret = 1;
 		        printf("debug[%s:%d]: packet - make other: x_seq=%u\n", __FILE__, __LINE__, packet_->head.x_seq); 
 		    }
     
@@ -594,7 +627,22 @@ static int buffToTun( Pipe * p ) {
             	    packet_ = (Packet *)(p->tun_list.tuns[i].w_seg.buff);
                     rt = getBytesToFd( &(p->tun_list.tuns[i].w_seg), p->tun_list.tuns[i].fd );
 		    printf("debug[%s:%d]: getBytesToFd: rt=%d\n", __FILE__, __LINE__, rt); 
-                    if ( rt == 1 && isBuffEmpty( &(p->tun_list.tuns[i].w_seg) ) ) {
+    		    if ( rt == -1 ) { // socket error
+		        printf("Error[%s:%d]: socket error %s\n", __FILE__, __LINE__, strerror(errno)); 
+    		        return -1;
+    		    }
+
+		    if ( rt == 0 ) {
+			// socket block
+			p->tun_list.tuns[i].flags |= FD_WRITE_BLOCK;
+			p->tun_list.sending_count++;
+			loop = 0;
+		    }
+		    else {
+			p->tun_list.tuns[i].flags &= ( ~FD_WRITE_BLOCK );
+		    }
+
+                    if ( isBuffEmpty( &(p->tun_list.tuns[i].w_seg) ) ) {
                         if ( packet_->head.flags & ACTION_ACK ) {
 			    usa.seq = packet_->head.x_ack;
 			    if ( p->last_recv_ack + 1 == usa.seq ) {
@@ -605,19 +653,18 @@ static int buffToTun( Pipe * p ) {
 
     		        cleanBuff( &(p->tun_list.tuns[i].w_seg) );
                 	p->tun_list.tuns[i].w_stat = TUN_W_INIT;
+			p->tun_list.sending_count--;
                     }
-    		    if ( rt == -1 ) { // socket error
-    		        return -1;
-    		    }
-    		    if ( rt == 0 ) { // socket block
-    		        loop = 0;
-    		    }
                     break;
             }
         }
     }
 
-    return ret;
+    if ( p->tun_list.sending_count == p->tun_list.len || p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) { 
+        return 1;
+    }
+
+    return 0;
 }
 
 /* 管道数据流动函数
@@ -629,6 +676,7 @@ static int buffToTun( Pipe * p ) {
  *
  * == return == 
  *  3: service ending
+ *  2: fd closed
  *  1: socket non-block AND buffer is full
  *  0: socket block AND buffer not full
  * -1: errors
@@ -650,17 +698,13 @@ int stream( int mode, Pipe * p, int fd ) {
 	    // 这个模式下，就是把fd的数据读到buff里去
 	    printf("debug[%s:%d]: mode=P_STREAM_FD2BUFF\n", __FILE__, __LINE__); 
             
-	    if ( p->stat != P_STAT_ACTIVE ) {
-	        return 2;
-	    } 
-	    
             want_sz = 0;
             rt = putBytesFromFd( &(p->fd2tun), p->fd, &want_sz );
-            printf("debug[%s:%d]: pubBytesFromFd read_sz=%lu rt=%d\n", __FILE__, __LINE__, want_sz, rt); 
+            printf("debug[%s:%d]: putBytesFromFd read_sz=%lu rt=%d\n", __FILE__, __LINE__, want_sz, rt); 
             switch ( rt ) {
                 case 0:  // socket block, buffer is not full
                     printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
-		    return 0;
+	            return 0;
                 case 1:  // buffer is full, socket non-block
                 case -3: // buffer is full, socket non-block
                     printf("debug[%s:%d]: buffer is full\n", __FILE__, __LINE__); 
@@ -669,8 +713,12 @@ int stream( int mode, Pipe * p, int fd ) {
                     printf("Error[%s:%d]: socket error\n", __FILE__, __LINE__); 
                     return -1;
                 case -2: // socket closed
+		    p->fd_flags |= FD_CLOSED;
                     printf("debug[%s:%d]: socket closed\n", __FILE__, __LINE__); 
-                    return -1;
+                    return 2;
+		default:
+                    printf("Error[%s:%d]: 不可能发生，心理安慰\n", __FILE__, __LINE__); 
+		    return -66;
             }
             break;
 
@@ -678,7 +726,7 @@ int stream( int mode, Pipe * p, int fd ) {
 	    // 这个模式下，就是把buffer: tun2fd 的数据尽量发送出去
 	    printf("debug[%s:%d]: mode=P_STREAM_BUFF2FD\n", __FILE__, __LINE__); 
 
-            if ( p->stat != P_STAT_ACTIVE ) {
+	    if ( p->fd_flags & FD_CLOSED ) {
 	        return 2;
 	    }
 	    
@@ -696,13 +744,16 @@ int stream( int mode, Pipe * p, int fd ) {
 	    	    }
                 case 1:  // send successfully, buffer is now empty
                     printf("debug[%s:%d]: send all\n", __FILE__, __LINE__); 
-    	            return 21;
+    	            return 22;
                 case -1: //socket error
-                    printf("debug[%s:%d]: socket error\n", __FILE__, __LINE__); 
+                    printf("Error[%s:%d]: socket error\n", __FILE__, __LINE__); 
     	            return -1;
-                case -3: //socket closed
-                    printf("Error[%s:%d]: socket closed\n", __FILE__, __LINE__); 
+                case -3: // send return 0,应该不会发生
+                    printf("Info[%s:%d]: send return 0\n", __FILE__, __LINE__); 
     	            return -1;
+		default:
+                    printf("Error[%s:%d]: 不可能发生，心理安慰\n", __FILE__, __LINE__); 
+		    return -66;
             }
             break;
 	
@@ -717,17 +768,22 @@ int stream( int mode, Pipe * p, int fd ) {
             rt = tunToBuff( fd, p );
 	    printf("debug[%s:%d]: tunToBuff rt=%d\n", __FILE__, __LINE__, rt); 
             switch ( rt ) {
-                case 1: // buffer's remaining space maybe not enough
-                    printf("Error[%s:%d]: socket closed\n", __FILE__, __LINE__); 
+		case 32: // end service
+                    printf("Info[%s:%d]: end service\n", __FILE__, __LINE__); 
+		    return rt;
+                case 31: // buffer's remaining space maybe not enough
+                    printf("debug[%s:%d]: buffer's remaining space maybe not enough\n", __FILE__, __LINE__); 
 	            return rt;
-                case 0: // socket block
-                    printf("Error[%s:%d]: socket closed\n", __FILE__, __LINE__); 
+                case 30: // socket block
+                    printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
                     return rt;
                 case -1:// errors
-                    printf("Error[%s:%d]: socket closed\n", __FILE__, __LINE__); 
+                    printf("Error[%s:%d]: errors %d %s\n", __FILE__, __LINE__, errno, strerror(errno) ); 
 	            return rt;
+		default:
+                    printf("Error[%s:%d]: 不可能发生，心理安慰\n", __FILE__, __LINE__); 
+		    return -66;
             }
-
             break;
 
 	case P_STREAM_BUFF2TUN:
@@ -740,20 +796,21 @@ int stream( int mode, Pipe * p, int fd ) {
 	     */
 	    printf("debug[%s:%d]: mode=P_STREAM_BUFF2TUN\n", __FILE__, __LINE__); 
 	    
-	    if ( p->stat != P_STAT_ACTIVE ) {
-	        return 2;
-	    }
-	    
-	    // if fd != p->fd, then tun_fd has read event
             rt = buffToTun( p );
-            printf("debug[%s:%d]: tunToBuff rt=%d\n", __FILE__, __LINE__, rt); 
+            printf("debug[%s:%d]: buffToTun rt=%d\n", __FILE__, __LINE__, rt); 
             switch ( rt ) {
-		case 1:
+		case 1: // 还有发送能力
 		    return 41;
-                case 0:  // 
-                    return 42;
-                case -1: //
-	            return 2;
+                case 0: // 无法再发送
+		    // (1) fd2tun已空
+		    // (2) 遭遇发送packet数量上限
+		    // (3) 所有socket遭遇write block
+                    return 40;
+                case -1:// error
+	            return -1;
+		default:
+                    printf("Error[%s:%d]: 不可能发生，心理安慰\n", __FILE__, __LINE__); 
+		    return -66;
             }
 	    break;
     }
