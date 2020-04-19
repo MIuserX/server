@@ -416,13 +416,13 @@ static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     }
     
     if ( ! isBuffEmpty( &(p->tun2fd) ) ) { 
-        printf("debug[%s:%d]: merge EPOLLOUT on\n", __FILE__, __LINE__, p->fd );
+        printf("debug[%s:%d]: merge EPOLLOUT on\n", __FILE__, __LINE__ );
 	if ( _set_fd_out_listen( p, ep, TRUE ) ) {
 	    return -1;
 	}
     }
     else {
-        printf("debug[%s:%d]: merge EPOLLOUT off\n", __FILE__, __LINE__, p->fd );
+        printf("debug[%s:%d]: merge EPOLLOUT off\n", __FILE__, __LINE__ );
 	if ( _set_fd_out_listen( p, ep, FALSE ) ) {
 	    return -1;
 	}
