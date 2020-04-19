@@ -50,6 +50,7 @@ int initPipe( Pipe * p, size_t sz, int ntun ) {
 
     p->fd = -1;
     p->tun_closed = 'n';
+    p->unsend_count = 0;
     p->last_send_seq = -1;
     p->last_send_ack = -1;
     p->last_recv_seq = -1;
@@ -114,6 +115,22 @@ static int pktCmp( void * a, void * b ) {
         return 1;
     }
     if ( _a->x_seq < _b->x_seq ) { 
+        return -1;		    
+    }
+    return 0;
+}
+
+static int ackCmp( void * a, void * b ) {
+    unsigned int * _a = (unsigned int *)a;
+    unsigned int * _b = (unsigned int *)b;
+
+    assert( a != NULL );
+    assert( b != NULL );
+
+    if ( *_a > *_b ) { 
+        return 1;
+    }
+    if ( *_a < *_b ) { 
         return -1;		    
     }
     return 0;
@@ -320,11 +337,12 @@ static int tunToBuff( int evt_fd, Pipe * p ) {
  * -4: X
  */
 static int _tunToBuff( int i, Pipe * p ) {
-    size_t       want_sz;
-    int          rt;
-    PacketHead * ph;
-    PacketHead * phead;
-    UnSendAck    usa;
+    size_t         want_sz;
+    int            rt;
+    unsigned int * pu;
+    PacketHead *   ph;
+    PacketHead *   phead;
+    UnSendAck      usa;
     
     assert( p != NULL );
 
@@ -389,7 +407,7 @@ static int _tunToBuff( int i, Pipe * p ) {
 		 *
 		 *
 		 */
-                printf("debug[%s:%d]: TUN_R_RDATA\n",  __FILE__, __LINE__);
+                printf("debug[%s:%d]: TUN_R_DATA\n",  __FILE__, __LINE__);
     	        ph = ( PacketHead *)( p->tun_list.tuns[i].r_seg.buff );
                 want_sz = ph->sz - p->tun_list.tuns[i].r_seg.sz;
         	rt = putBytesFromFd( &(p->tun_list.tuns[i].r_seg), p->tun_list.tuns[i].fd, &want_sz );
@@ -427,12 +445,27 @@ static int _tunToBuff( int i, Pipe * p ) {
 		    // case 3: ph->x_ack >  p->last_send_ack + 1
 		    //   有可能会发生，因为多个tunnel fd 可能会发生
 		    //   后来的packet先到的情况。
+                    printf("debug[%s:%d]: x_ack=%u last_send_ack=%u\n", 
+				    __FILE__, __LINE__, 
+				    ph->x_ack, p->last_send_ack);
 		    if ( ph->x_ack == p->last_send_ack + 1 ) {
     	                ackBytes( &(p->fd2tun), ph->x_ack );
 			(p->last_send_ack)++;
+
+			while ( p->prev_acklist.len > 0 ) {
+			    pu = getHeadPtr( &(p->prev_acklist) );
+			    if ( ph->x_ack == p->last_send_ack + 1 ) {
+    	                        ackBytes( &(p->fd2tun), ph->x_ack );
+			        (p->last_send_ack)++;
+			        justOutLine( &(p->prev_acklist) );
+			    }
+			    else {
+			        break;
+			    }
+			}
 		    }
 		    else if ( ph->x_ack > p->last_send_ack + 1 ) {
-		        if ( inLine( &(p->prev_acklist), (void *)&(ph->x_ack), sizeof(ph->x_ack) ) ) {
+		        if ( seqInLine( &(p->prev_acklist), (void *)&(ph->x_ack), sizeof(ph->x_ack), ackCmp ) ) {
 		            return -3;
 			}
 		    }
@@ -441,7 +474,6 @@ static int _tunToBuff( int i, Pipe * p ) {
 		    }
 		    
                     if ( ph->sz == PACKET_HEAD_SZ ) {
-    	                 p->last_recv_seq = ph->x_seq;
     	                 p->tun_list.tuns[i].r_stat = TUN_R_INIT;
 		         break;
 		    }
@@ -449,11 +481,6 @@ static int _tunToBuff( int i, Pipe * p ) {
 		if ( ph->flags & ACTION_PSH ) {
     	            want_sz = PACKET_HEAD_SZ;
     	            discardBytes( &(p->tun_list.tuns[i].r_seg), &want_sz );
-                    
-		    printf("debug[%s:%d]: discardBytes后packet数据如下：\n",  __FILE__, __LINE__);
-                    dumpPacket( (Packet *)(p->tun_list.tuns[i].r_seg.buff) );
-                    dumpBuff( &(p->tun_list.tuns[i].r_seg) );
-    	            
 		    p->tun_list.tuns[i].r_stat = TUN_R_MOVE;
 		}
     	        break;
@@ -465,7 +492,6 @@ static int _tunToBuff( int i, Pipe * p ) {
 		ph = ( PacketHead *)( p->tun_list.tuns[i].r_seg.buff);
                 
 		printf("debug[%s:%d]: 待转移的packet如下：\n",  __FILE__, __LINE__);
-    	        dumpPacket( (Packet *)(p->tun_list.tuns[i].r_seg.buff) );
     	        dumpBuff( &(p->tun_list.tuns[i].r_seg) );
        	        
 		if ( ph->x_seq == p->last_recv_seq + 1 ) {
@@ -482,16 +508,16 @@ static int _tunToBuff( int i, Pipe * p ) {
                                 printf("debug[%s:%d]: 转移完成后tun2fd情况：\n",  __FILE__, __LINE__);
     	                        dumpBuff( &(p->tun2fd) );
     		                
-		        	    usa.sending = 'n';
-		        	    usa.seq = ph->x_seq;
+		        	usa.sending = 'n';
+		        	usa.seq = ph->x_seq;
 		                if ( seqInLine( &(p->ack_sending_list), (void *)&usa, sizeof(usa), cmp ) ) {
 		        	        return -3;
-		        	    }
-		        	    p->unsend_count++;
+		        	}
+		        	p->unsend_count++;
 		        
-		        	    p->last_recv_seq = ph->x_seq;
+		        	p->last_recv_seq = ph->x_seq;
     		            } 
-		    	else {
+		    	    else {
                                 dprintf(2, "Error[%s:%d]: programing error rt=%d\n",  __FILE__, __LINE__, rt);
     		                return -4;
     		            }
@@ -757,6 +783,7 @@ int stream( int mode, Pipe * p, int fd ) {
 	    	    else {
 	    	        return 20;
 	    	    }
+		    break;
                 case 1:  // send successfully, buffer is now empty
                     printf("debug[%s:%d]: send all\n", __FILE__, __LINE__); 
     	            return 22;
