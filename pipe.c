@@ -378,21 +378,28 @@ static int _tunToBuff( int i, Pipe * p ) {
 
 	        if ( PACKET_HEAD_SZ == p->tun_list.tuns[i].r_seg.sz ) {
     	            ph = ( PacketHead *)( p->tun_list.tuns[i].r_seg.buff);
-    	            if ( ph->flags & ACTION_FIN ) {
+		    if ( ph->flags & ACTION_FIN ) {
                         p->tun_list.tuns[i].status = TUN_CLOSED;
                         p->tun_list.tuns[i].r_stat = TUN_R_INIT;
 		    }
-		    else if ( PACKET_HEAD_SZ == ph->sz ) {
-    	                // 如果仅仅是个ack包
-                        printf("debug[%s:%d]: 读取完PacketHead，仅ACK：\n",  __FILE__, __LINE__);
-                        dumpPacket( (Packet *)(p->tun_list.tuns[i].r_seg.buff) );
-                        p->tun_list.tuns[i].r_stat = TUN_R_FULL;
-    	            }
 		    else {
-			// 是个带有数据的包
-                        printf("debug[%s:%d]: 读取完PacketHead，buffer如下：\n",  __FILE__, __LINE__);
-                        dumpBuff( &(p->tun_list.tuns[i].r_seg) );
-        	        p->tun_list.tuns[i].r_stat = TUN_R_DATA;
+                        printf("debug[%s:%d]: 读取完PacketHead: \n", __FILE__, __LINE__);
+		        if ( ph->flags & ACTION_SYN ) {
+                            printf("debug[%s:%d]:   SYN\n", __FILE__, __LINE__);
+			    p->last_recv_seq = ph->x_seq - 1;
+			    p->last_recv_ack = ph->x_seq - 1;
+			}
+		        if ( ph->flags & ACTION_ACK ) {
+                            printf("debug[%s:%d]:   ACK, x_ack=%u\n", __FILE__, __LINE__, ph->x_ack);
+			}
+
+			if ( PACKET_HEAD_SZ == ph->sz ) {
+                            p->tun_list.tuns[i].r_stat = TUN_R_FULL;
+    	                }
+			else {
+                            printf("debug[%s:%d]:   PSH, x_seq=%u\n", __FILE__, __LINE__, ph->x_seq);
+        	            p->tun_list.tuns[i].r_stat = TUN_R_DATA;
+			}
 		    }
         	}
                 break;
@@ -638,7 +645,8 @@ static int buffToTun( Pipe * p ) {
                         packet_->head.flags |= ACTION_PSH;
 
 			if ( p->last_send_seq == 0 ) {
-		            p->last_send_seq = random() % 66 + 1;	
+		            p->last_send_seq = random() % 66 + 1;
+			    packet_->head.flags |= ACTION_SYN;
 			}
                         packet_->head.x_seq = ( ++(p->last_send_seq) );
     
