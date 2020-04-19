@@ -603,6 +603,8 @@ static int buffToTun( Pipe * p ) {
 
     assert( p != NULL );
 
+    p->tun_list.sending_count = 0;
+
     // 把每个tunnel fd的发送状态都推进一遍
     for ( i = 0; i < p->tun_list.len; i++ ) {
 	printf("debug[%s:%d]: buffToTun i=%d fd=%d\n", 
@@ -696,7 +698,6 @@ static int buffToTun( Pipe * p ) {
 		    if ( rt == 0 ) {
 			// socket block
 			p->tun_list.tuns[i].flags |= FD_WRITE_BLOCK;
-			p->tun_list.sending_count++;
 			loop = 0;
 		    }
 		    else {
@@ -718,11 +719,14 @@ static int buffToTun( Pipe * p ) {
 
     		        cleanBuff( &(p->tun_list.tuns[i].w_seg) );
                 	p->tun_list.tuns[i].w_stat = TUN_W_INIT;
-			p->tun_list.sending_count--;
                     }
                     break;
             }
         }
+
+	if ( p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) {
+	    p->tun_list.sending_count++;
+	}
     }
 
     if ( p->tun_list.sending_count == p->tun_list.len || p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) { 
