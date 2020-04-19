@@ -579,7 +579,7 @@ void * client_pthread( void * p ) {
     while ( 1 ) {
         //== 阻塞在这里等待epoll事件
         printf("debug[%s:%d]: epoll_wait...\n", __FILE__, __LINE__ );
-        if ( ( ep.wait_fds = epoll_wait( ep.epoll_fd, ep.evs, ep.fd_count, timeout ) ) == -1 ) {
+        if ( ( ep.wait_fds = epoll_wait( ep.epoll_fd, ep.evs, ep.fd_count, -1 ) ) == -1 ) {
             dprintf( 2, "Epoll Wait Error: %s\n", strerror( errno ) );
             client_pthread_exit( -3, &pp, &ep );
         }
@@ -593,7 +593,6 @@ void * client_pthread( void * p ) {
             if ( rt == 2 ) { // auth ok
 	        auth_ok = 1;
                 printf("Info[%s:%d]: auth to server success\n", __FILE__, __LINE__ );
-		timeout = -1;
 	    }
 	    else if ( rt == 0 ) { // socket block
                 //printf("Debug[%s:%d]: auth socket block\n", __FILE__, __LINE__);
@@ -641,6 +640,8 @@ void * client_pthread( void * p ) {
 		if ( ep.evs[i].events & EPOLLIN ) {
                     printf("debug[%s:%d]: client fd %d: r event\n", __FILE__, __LINE__, ep.evs[i].data.fd );
                     rt = stream( P_STREAM_FD2BUFF, &pp, ep.evs[i].data.fd );
+                    printf("debug[%s:%d]: not auth ok, read data\n", __FILE__, __LINE__);
+		    dumpBuff( &(pp.fd2tun) );
                     switch ( rt ) {
 	                case 2: // socket closed
                             if ( ! isBuffEmpty( &(pp.tun2fd) ) ) {
