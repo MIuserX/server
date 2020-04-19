@@ -51,10 +51,6 @@ int initPipe( Pipe * p, size_t sz, int ntun ) {
     p->fd = -1;
     p->tun_closed = 'n';
     p->unsend_count = 0;
-    p->last_send_seq = -1;
-    p->last_send_ack = -1;
-    p->last_recv_seq = -1;
-    p->last_recv_ack = -1;
 
     return 0;
 }
@@ -450,13 +446,13 @@ static int _tunToBuff( int i, Pipe * p ) {
 				    ph->x_ack, p->last_send_ack);
 		    if ( ph->x_ack == p->last_send_ack + 1 ) {
     	                ackBytes( &(p->fd2tun), ph->x_ack );
-			(p->last_send_ack)++;
+			p->last_send_ack = ph->x_ack;
 
 			while ( p->prev_acklist.len > 0 ) {
 			    pu = getHeadPtr( &(p->prev_acklist) );
 			    if ( ph->x_ack == p->last_send_ack + 1 ) {
     	                        ackBytes( &(p->fd2tun), ph->x_ack );
-			        (p->last_send_ack)++;
+			        p->last_send_ack = ph->x_ack;
 			        justOutLine( &(p->prev_acklist) );
 			    }
 			    else {
@@ -640,6 +636,10 @@ static int buffToTun( Pipe * p ) {
 		    //== 组装ACTION_PSH和x_seq
 		    if ( hasActiveData( &(p->fd2tun) ) ) { 
                         packet_->head.flags |= ACTION_PSH;
+
+			if ( p->last_send_seq == 0 ) {
+		            p->last_send_seq = random() % 66 + 1;	
+			}
                         packet_->head.x_seq = ( ++(p->last_send_seq) );
     
                         seg_sz = PACKET_DATA_SZ;
@@ -648,13 +648,13 @@ static int buffToTun( Pipe * p ) {
 		            return -1;
                         }
                         packet_->head.sz += seg_sz;
-		        printf("debug[%s:%d]: packet - make other: x_seq=%u\n", __FILE__, __LINE__, packet_->head.x_seq); 
+		        printf("debug[%s:%d]: packet - make data: x_seq=%u\n", __FILE__, __LINE__, packet_->head.x_seq); 
 		    }
 
 		    //== 发送FIN
-		    if ( !( packet_->head.flags & ACTION_PSH ) 
-			    && !( packet_->head.flags |= ACTION_ACK )
-		            && p->stat == P_STAT_ENDING ) {
+		    if ( !( packet_->head.flags & ACTION_PSH )
+			    && !( packet_->head.flags & ACTION_ACK )
+		            && p->stat == P_STAT_ENDING1 ) {
 		        packet_->head.flags |= ACTION_FIN;
 			p->stat == P_STAT_ENDING2;
 		    }
