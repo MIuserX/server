@@ -443,16 +443,16 @@ int _destroy_pipe( Pipe * p, ForEpoll * ep ) {
     int j;
     assert( p != NULL );
 
-    delFd( &fd_list, p->fd );
     if ( _del_fd( ep, p->fd ) ) {
         return -1;
     }
+    delFd( &fd_list, p->fd );
     for ( j = 0; j < p->tun_list.len; j++ ) {
         if ( p->tun_list.tuns[j].fd != -1 ) {
-            delFd( &fd_list, p->tun_list.tuns[j].fd );
             if ( _del_fd( ep, p->tun_list.tuns[j].fd ) ) {
 	        return -1;
 	    }
+            delFd( &fd_list, p->tun_list.tuns[j].fd );
         }
     }
     
@@ -552,29 +552,47 @@ void main_loop( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
 		if ( ep.evs[i].events & EPOLLIN ) {
 	            printf("debug[%s:%d]: merge fd IN\n", __FILE__, __LINE__);
 		    rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
+	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                // destroy fd_nodes
+	                // destroy epoll
+	                // destroy pipe 
+	                break;
+	            }
 		}
 		if ( ep.evs[i].events & EPOLLOUT ) {
 	            printf("debug[%s:%d]: merge fd OUT\n", __FILE__, __LINE__);
 		    rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
+	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                // destroy fd_nodes
+	                // destroy epoll
+	                // destroy pipe 
+	                break;
+	            }
 		}
 	    }
 	    else if ( fd_node->type == FD_TUN ) {
 		if ( ep.evs[i].events & EPOLLIN ) {
 	            printf("debug[%s:%d]: tunnel fd IN\n", __FILE__, __LINE__);
 		    rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
+	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                // destroy fd_nodes
+	                // destroy epoll
+	                // destroy pipe 
+	                break;
+	            }
 		}
 		if ( ep.evs[i].events & EPOLLOUT ) {
 	            printf("debug[%s:%d]: tunnel fd OUT\n", __FILE__, __LINE__);
 		    rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
+	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                // destroy fd_nodes
+	                // destroy epoll
+	                // destroy pipe 
+	                break;
+	            }
 		}
 	    }
 
-	    if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-		// destroy fd_nodes
-		// destroy epoll
-	        // destroy pipe 
-		break;
-	    }
         }
     }
 }
