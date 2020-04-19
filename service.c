@@ -378,7 +378,8 @@ static void _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
          *
          */
         if ( p->fd_flags & FD_CLOSED ) { 
-	    if ( ( ! hasDataToTun( p ) ) && ( p->tun_list.sending_count == 0 ) 
+	    if ( ( ! hasDataToTun( p ) ) 
+		    && ( p->tun_list.sending_count == 0 ) 
 		    && ( ! hasUnAckData( &(p->fd2tun) ) ) ) {
                 printf("debug[%s:%d]: ENDING1 - will send FIN\n", __FILE__, __LINE__ );
                 p->stat = P_STAT_ENDING1;
@@ -502,6 +503,10 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
             }
 	}
 
+        if ( p->fd_flags & FD_CLOSED && ( ! hasUnAckData( &(p->fd2tun) ) ) ) {
+	    p->stat = P_STAT_ENDING1;
+	}
+
 	if ( p->tun_closed == 'y' && isBuffEmpty( &(p->tun2fd) ) ) {
 	    p->stat = P_STAT_END;
 	}
@@ -527,14 +532,16 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	}
     }
     
-    if ( ! isBuffEmpty( &(p->tun2fd) ) ) { 
-        printf("warning[%s:%d]: client fd %d met wblock, tun2fd is not empty\n", __FILE__, __LINE__, p->fd );
-	
-	// 如果 tun2fd 非空，
-	// 监听 EPOLLOUT 事件。
+    if ( p->stat == P_STAT_ENDING1 ) {
+        printf("debug[%s:%d]: ENDING1 - all tunnel fds EPOLLOUT\n", __FILE__, __LINE__ );
+        _set_tun_out_listen( p, ep, TRUE, TRUE );
+    }
+    if ( ! isBuffEmpty( &(p->tun2fd) ) ) {
+        printf("debug[%s:%d]: merge fd %d set EPOLLOUT\n", __FILE__, __LINE__, p->fd );
 	_set_fd_out_listen( p, ep, TRUE );
     }
     else {
+        printf("debug[%s:%d]: merge fd %d unset EPOLLOUT\n", __FILE__, __LINE__, p->fd );
 	_set_fd_out_listen( p, ep, FALSE );
     }
 }
