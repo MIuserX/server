@@ -65,6 +65,7 @@ int initTunList( TunList * tun_list, size_t len ) {
     tun_list->len = len;
     tun_list->sz = 0;
     tun_list->cur_idx = 0;
+    tun_list->sending_count = 0;
     for ( i = 0; i < len; i++ ) {
 	if ( initTunnel( tun_list->tuns + i ) ) {
 	    for ( j = 0; j < i; j++ ) {
