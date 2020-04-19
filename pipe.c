@@ -448,19 +448,20 @@ static int _tunToBuff( int i, Pipe * p ) {
 		    // case 3: ph->x_ack >  p->last_send_ack + 1
 		    //   有可能会发生，因为多个tunnel fd 可能会发生
 		    //   后来的packet先到的情况。
-                    printf("debug[%s:%d]: x_ack=%u last_send_ack=%u\n", 
-				    __FILE__, __LINE__, 
-				    ph->x_ack, p->last_send_ack);
 		    if ( ph->x_ack == p->last_send_ack + 1 ) {
     	                ackBytes( &(p->fd2tun), ph->x_ack );
 			p->last_send_ack = ph->x_ack;
+                        printf("debug[%s:%d]: ackBytes x_ack=%u \n", 
+					__FILE__, __LINE__, ph->x_ack);
 
 			while ( p->prev_acklist.len > 0 ) {
 			    pu = getHeadPtr( &(p->prev_acklist) );
-			    if ( ph->x_ack == p->last_send_ack + 1 ) {
-    	                        ackBytes( &(p->fd2tun), ph->x_ack );
-			        p->last_send_ack = ph->x_ack;
+			    if ( *pu == p->last_send_ack + 1 ) {
+    	                        ackBytes( &(p->fd2tun), *pu );
+			        p->last_send_ack = (*pu);
 			        justOutLine( &(p->prev_acklist) );
+                                printf("debug[%s:%d]: ackBytes x_ack=%u \n", 
+						__FILE__, __LINE__, *pu);
 			    }
 			    else {
 			        break;
@@ -468,12 +469,16 @@ static int _tunToBuff( int i, Pipe * p ) {
 			}
 		    }
 		    else if ( ph->x_ack > p->last_send_ack + 1 ) {
+                        printf("debug[%s:%d]: prev x_ack=%u, last_send_ack=%u\n", 
+					__FILE__, __LINE__, 
+					ph->x_ack, 
+					p->last_send_ack);
 		        if ( seqInLine( &(p->prev_acklist), (void *)&(ph->x_ack), sizeof(ph->x_ack), ackCmp ) ) {
 		            return -3;
 			}
 		    }
 		    else { // case 1
-		        
+		        // 理论上不可能发生，除非对端重发了ACK
 		    }
 		    
                     if ( ph->sz == PACKET_HEAD_SZ ) {
