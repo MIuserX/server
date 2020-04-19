@@ -511,7 +511,7 @@ static int _tunToBuff( int i, Pipe * p ) {
 		        	usa.sending = 'n';
 		        	usa.seq = ph->x_seq;
 		                if ( seqInLine( &(p->ack_sending_list), (void *)&usa, sizeof(usa), cmp ) ) {
-		        	        return -3;
+		        	    return -3;
 		        	}
 		        	p->unsend_count++;
 		        
@@ -740,9 +740,6 @@ int stream( int mode, Pipe * p, int fd ) {
     assert( mode > P_STREAM_BEGIN && mode < P_STREAM_END );
     assert( fd >= 0 );
 	
-    printf("debug[%s:%d]: p->stat == P_STAT_ACTIVE => %d\n", __FILE__, __LINE__, p->stat == P_STAT_ACTIVE); 
-    printf("debug[%s:%d]: p = %p\n", __FILE__, __LINE__, p); 
-
     switch ( mode ) {
         case P_STREAM_FD2BUFF:
 	    // 这个模式下，就是把fd的数据读到buff里去
