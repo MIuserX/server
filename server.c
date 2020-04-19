@@ -192,7 +192,7 @@ static int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     int    rt;
 
     while ( 1 ) {
-	printf("debug[%s:%d]: _relay_fd_to_tun read merge fd", __FILE__, __LINE__ );
+	printf("debug[%s:%d]: _relay_fd_to_tun read merge fd\n", __FILE__, __LINE__ );
         //==== 从client fd读
 	// 前提：
 	//   fd not closed
@@ -219,7 +219,7 @@ static int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
                 return -1;
         }
     
-	printf("debug[%s:%d]: _relay_fd_to_tun write tunnel fds", __FILE__, __LINE__ );
+	printf("debug[%s:%d]: _relay_fd_to_tun write tunnel fds\n", __FILE__, __LINE__ );
         //==== 往tunnels写
 	// 前提：
 	//   有数据可写：
@@ -261,9 +261,11 @@ static int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
         if ( p->fd_flags & FD_CLOSED ) { 
 	    if ( ( ! hasDataToTun( p ) ) && ( p->tun_list.sending_count == 0 ) 
 		    && ( ! hasUnAckData( &(p->fd2tun) ) ) ) {
+                printf("debug[%s:%d]: ENDING1 - will send FIN\n", __FILE__, __LINE__ );
                 p->stat = P_STAT_ENDING1;
 	    }
 	    else {
+                printf("debug[%s:%d]: ENDING - FIN waiting\n", __FILE__, __LINE__ );
 	        p->stat = P_STAT_ENDING;
 	    }
         }
@@ -291,24 +293,26 @@ static int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     if ( p->stat == P_STAT_ENDING1 ) {
 	// 这时表示 merge fd 已 closed，
 	// 需要向 Tunnel 对端发送 FIN packet。
-        printf("warning[%s:%d]: buffer中存有数据待发\n", __FILE__, __LINE__ );
+        printf("debug[%s:%d]: ENDING1 - all tunnel fds EPOLLOUT\n", __FILE__, __LINE__ );
 	if ( _set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
 	    return -1;
 	}
     }
     else if ( hasDataToTun( p ) ) {
-        printf("warning[%s:%d]: buffer中存有数据待发\n", __FILE__, __LINE__ );
+        printf("debug[%s:%d]: set EPOLLOUT for all tunnel fds\n", __FILE__, __LINE__ );
 	if ( _set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
 	    return -1;
 	}
     }
     else if ( p->tun_list.sending_count > 0 ) {
         // 尝试为哪些碰到write block的fd设置EPOLLOUT
+        printf("debug[%s:%d]: set EPOLLOUT for tunnel fds who met write-block\n", __FILE__, __LINE__ );
 	if ( _set_tun_out_listen( p, ep, TRUE, FALSE ) ) {
 	    return -1;
 	}
     }
     else {
+        printf("debug[%s:%d]: unset EPOLLOUT for tunnel fds\n", __FILE__, __LINE__ );
 	if ( _set_tun_out_listen( p, ep, TRUE, FALSE ) ) {
 	    return -1;
 	}
