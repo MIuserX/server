@@ -243,6 +243,17 @@ static int tunToBuff( int evt_fd, Pipe * p ) {
 		p->tun_list.tuns[i].fd == evt_fd ) {
 	    rt = _tunToBuff( i, p );
             
+            /* Tunnel 对端发送了FIN，
+	     * 说明：
+	     *   (1) 对方的merge fd已经主动closed了，
+	     *       向对端传送数据的行为已经没有意义了，
+	     *       因为无法向merge fd发送了。
+	     *   (2) 对方已经把要向我方发的数据都发送了，
+	     *       且收到了我方的ack。
+	     * 
+	     *
+	     */
+
 	    if ( rt == 2 ) {
 	        for ( i = 0; i < p->tun_list.len; i++ ) {
 		    p->tun_list.tuns[i].status = TUN_CLOSED;
@@ -765,6 +776,10 @@ int stream( int mode, Pipe * p, int fd ) {
 	    // 这个模式下，就是把fd的数据读到buff里去
 	    printf("debug[%s:%d]: mode=P_STREAM_FD2BUFF\n", __FILE__, __LINE__); 
             
+	    if ( p->fd_flags & FD_CLOSED ) {
+	        return 2;
+	    }
+
             want_sz = 0;
             rt = putBytesFromFd( &(p->fd2tun), p->fd, &want_sz );
             printf("debug[%s:%d]: putBytesFromFd read_sz=%lu rt=%d\n", __FILE__, __LINE__, want_sz, rt); 
@@ -830,7 +845,7 @@ int stream( int mode, Pipe * p, int fd ) {
 	case P_STREAM_TUN2BUFF:
 	    printf("debug[%s:%d]: mode=P_STREAM_TUN2BUFF\n", __FILE__, __LINE__); 
 	    
-	    if ( p->stat != P_STAT_ACTIVE ) {
+	    if ( p->tun_closed == 'y' ) {
 	        return 2;
 	    }
 
@@ -857,6 +872,10 @@ int stream( int mode, Pipe * p, int fd ) {
             break;
 
 	case P_STREAM_BUFF2TUN:
+	    
+	    if ( p->tun_closed == 'y' ) {
+	        return 2;
+	    }
 	    /* 这个模式下，是把buffer的数据写向各个tunnel fd。
 	     *
 	     * 
