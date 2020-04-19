@@ -918,11 +918,11 @@ int getAEmptyPipe( PipeList * pl ) {
 
     for ( i = 0; i < P_LIST_SZ; i++ ) {
         if ( !(pl->pipes[i].use) ) {
-	    if ( initPipe( pl + i, P_BUFF_SZ, TUN_LIST_SZ ) ) {
+	    if ( initPipe( pl->pipes + i, P_BUFF_SZ, TUN_LIST_SZ ) ) {
 	        return -2;
 	    }
 	    pl->pipes[i].use = 1;
-	    return pl + i;
+	    return i;
 	}
     }
     return -3;

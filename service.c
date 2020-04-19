@@ -709,6 +709,7 @@ void * client_pthread( void * p ) {
 int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping_addr, FdList * fd_list ) {
     int          rt;
     size_t       want_sz;
+    int          idx;
     AuthPacket * ap;
     Pipe       * p;
     Pipe       * new_p;
@@ -755,26 +756,21 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                             ap->code = (*ecode) = AUTH_KEY_USED;
                         }
                         else { 
-			    // 申请pipe内存
-			    if ( ( new_p = (Pipe *)malloc( sizeof(Pipe) ) ) == NULL ) {
+			    idx = getAEmptyPipe( pl );
+			    if ( idx == -1 ) {
+                                ap->code = (*ecode) = AUTH_USR_FULL;
+			        return 2;
+			    }
+			    else {
 			        return -1;
 			    }
-			    // 初始化pipe
-                    	    if ( initPipe( new_p, P_BUFF_SZ, TUN_LIST_SZ ) ) {
-                                free(new_p);
-				return -1;
-                    	    }
-			    // 看pipelist是否满
-                            if ( isPipeListFull( pl ) ) {
-				destroyPipe( new_p );
-                                free(new_p);
-                                ap->code = (*ecode) = AUTH_USR_FULL;
-				return 2;
-                            }
+			    new_p = pl->pipes + idx;
+
 			    // 连接mapping addr
                             if ( ( rt = connectFd( new_p, mapping_addr ) ) != 0 ) {
-				destroyPipe( new_p );
-                                free(new_p);
+				delPipeByI( pl, idx );
+				new_p = NULL;
+				idx = -1;
                                 ap->code = (*ecode) = AUTH_SERV_ERR;
                                 dprintf(2, "Error[%s:%d]: connect mapping addr failed, errno=%d, %s\n", __FILE__, __LINE__, errno, strerror(errno));
 			        return 2;
@@ -787,8 +783,9 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                                 fdnode.t = time( NULL );
                                 fdnode.p = new_p;
                                 if ( addFd( fd_list, &fdnode ) ) {
-				    destroyPipe( new_p );
-                                    free(new_p);
+				    delPipeByI( pl, idx );
+                                    new_p = NULL;
+				    idx = -1;
                                     ap->code = (*ecode) = AUTH_USR_FULL;
                                     return 2;
                                 }
@@ -797,9 +794,10 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                                 memcpy( (void *)(new_p->key), (void *)(ap->key), P_KEY_SZ );
                                 new_p->stat = P_STAT_ACTIVE;
 				joinTunList( &(new_p->tun_list), fn->fd );
-                                // 加入pipe list
-                                addPipe( pl, new_p, &(fn->p) );
 				printf("new_p=%p fn->p=%p\n", new_p, fn->p);
+				
+				new_p = NULL;
+				idx = -1;
                             }
                         }
                         break;
