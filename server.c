@@ -390,6 +390,10 @@ static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
             }
 	}
 
+        if ( p->fd_flags & FD_CLOSED && ( ! hasUnAckData( &(p->fd2tun) ) ) ) {
+	    p->stat = P_STAT_ENDING1;
+	}
+
 	if ( p->tun_closed == 'y' && isBuffEmpty( &(p->tun2fd) ) ) {
 	    p->stat = P_STAT_END;
 	}
@@ -415,6 +419,12 @@ static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	}
     }
     
+    if ( p->stat == P_STAT_ENDING1 ) {
+        printf("debug[%s:%d]: ENDING1 - all tunnel fds EPOLLOUT\n", __FILE__, __LINE__ );
+        if ( _set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
+	    return -1;
+	}
+    }
     if ( ! isBuffEmpty( &(p->tun2fd) ) ) { 
         printf("debug[%s:%d]: merge EPOLLOUT on\n", __FILE__, __LINE__ );
 	if ( _set_fd_out_listen( p, ep, TRUE ) ) {
