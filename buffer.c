@@ -1296,12 +1296,14 @@ int ackBytes( Buffer * b, unsigned int ack_seq ) {
     //       => ack_begin = -1
     if ( b->ack_begin != -1 ) {
         b->ack_begin = ( buff2seg.end + 1 ) % b->len;
-    } else {
-        b->ack_begin = -1;
     }
     
     // line is not empty, so error will not occur
     outLine( &(b->buff2segs), (void *)(&buff2seg) );
+
+    if ( isLineEmpty( &(b->buff2segs) ) ) {
+        b->ack_begin = -1;
+    }
 
     return 0;
 }
