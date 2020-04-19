@@ -290,6 +290,7 @@ static int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	}
     }
 
+    printf("debug[%s:%d]: p->unsed_count=%d\n", __FILE__, __LINE__, p->unsend_count );
     if ( p->stat == P_STAT_ENDING1 ) {
 	// 这时表示 merge fd 已 closed，
 	// 需要向 Tunnel 对端发送 FIN packet。
@@ -415,16 +416,14 @@ static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     }
     
     if ( ! isBuffEmpty( &(p->tun2fd) ) ) { 
-        printf("warning[%s:%d]: client fd %d met wblock, tun2fd is not empty\n", __FILE__, __LINE__, p->fd );
-	
-	// 如果 tun2fd 非空，
-	// 监听 EPOLLOUT 事件。
-	if ( _set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
+        printf("debug[%s:%d]: merge EPOLLOUT on\n", __FILE__, __LINE__, p->fd );
+	if ( _set_fd_out_listen( p, ep, TRUE ) ) {
 	    return -1;
 	}
     }
     else {
-	if ( _set_tun_out_listen( p, ep, TRUE, FALSE ) ) {
+        printf("debug[%s:%d]: merge EPOLLOUT off\n", __FILE__, __LINE__, p->fd );
+	if ( _set_fd_out_listen( p, ep, FALSE ) ) {
 	    return -1;
 	}
     }
