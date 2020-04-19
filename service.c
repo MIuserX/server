@@ -381,22 +381,27 @@ static void _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	    if ( ( ! hasDataToTun( p ) ) 
 		    && ( p->tun_list.sending_count == 0 ) 
 		    && ( ! hasUnAckData( &(p->fd2tun) ) ) ) {
-                printf("debug[%s:%d]: ENDING1 - will send FIN\n", __FILE__, __LINE__ );
-                p->stat = P_STAT_ENDING1;
+		if ( p->stat == P_STAT_ACTIVE || p->stat == P_STAT_ENDING ) {
+                    printf("debug[%s:%d]: ENDING1 - will send FIN\n", __FILE__, __LINE__ );
+                    p->stat = P_STAT_ENDING1;
+		}
 	    }
 	    else {
-                printf("debug[%s:%d]: ENDING - FIN waiting\n", __FILE__, __LINE__ );
-	        p->stat = P_STAT_ENDING;
+		if ( p->stat == P_STAT_ACTIVE ) {
+                    printf("debug[%s:%d]: ENDING - FIN waiting\n", __FILE__, __LINE__ );
+	            p->stat = P_STAT_ENDING;
+		}
 	    }
         }
 
+	/*
         printf("debug[%s:%d]: why not ENDING ?\n", __FILE__, __LINE__ );
         printf("debug[%s:%d]: fd2tun:\n", __FILE__, __LINE__ );
 	dumpBuff( &(p->fd2tun) );
         printf("debug[%s:%d]: unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count );
         printf("debug[%s:%d]: sending_count=%d\n", __FILE__, __LINE__, p->tun_list.sending_count );
         printf("debug[%s:%d]: buff2segs.len=%d\n", __FILE__, __LINE__, p->fd2tun.buff2segs.len );
-
+        */
 	
         if ( rw == 'r' ) { // client fd met read event
             /* 尽力把client fd读到block。
@@ -511,9 +516,22 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
             }
 	}
 
-        if ( p->fd_flags & FD_CLOSED && ( ! hasUnAckData( &(p->fd2tun) ) ) ) {
-	    p->stat = P_STAT_ENDING1;
-	}
+        if ( p->fd_flags & FD_CLOSED ) { 
+	    if ( ( ! hasDataToTun( p ) ) 
+		    && ( p->tun_list.sending_count == 0 ) 
+		    && ( ! hasUnAckData( &(p->fd2tun) ) ) ) {
+		if ( p->stat == P_STAT_ACTIVE || p->stat == P_STAT_ENDING ) {
+                    printf("debug[%s:%d]: ENDING1 - will send FIN\n", __FILE__, __LINE__ );
+                    p->stat = P_STAT_ENDING1;
+		}
+	    }
+	    else {
+		if ( p->stat == P_STAT_ACTIVE ) {
+                    printf("debug[%s:%d]: ENDING - FIN waiting\n", __FILE__, __LINE__ );
+	            p->stat = P_STAT_ENDING;
+		}
+	    }
+        }
 
 	if ( p->tun_closed == 'y' && isBuffEmpty( &(p->tun2fd) ) ) {
 	    p->stat = P_STAT_END;
@@ -527,7 +545,10 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	     *   ! isBuffFull( p->fd2tun ) &&
 	     *   bblock == 'n'
 	     */
-	    if ( rblock == 'n' && ( ! isBuffFull( &(p->tun2fd) ) ) && bblock == 'n' ) {
+	    if ( rblock == 'n' 
+		    && p->tun_closed == 'n' 
+		    && ( ! isBuffFull( &(p->tun2fd) ) ) 
+		    && bblock == 'n' ) {
 	        continue;
 	    }
 	    break;
