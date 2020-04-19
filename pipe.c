@@ -846,7 +846,7 @@ int stream( int mode, Pipe * p, int fd ) {
 	    printf("debug[%s:%d]: mode=P_STREAM_TUN2BUFF\n", __FILE__, __LINE__); 
 	    
 	    if ( p->tun_closed == 'y' ) {
-	        return 2;
+	        return 32;
 	    }
 
 	    // if fd != p->fd, then tun_fd has read event
@@ -874,7 +874,7 @@ int stream( int mode, Pipe * p, int fd ) {
 	case P_STREAM_BUFF2TUN:
 	    
 	    if ( p->tun_closed == 'y' ) {
-	        return 2;
+	        return 40;
 	    }
 	    /* 这个模式下，是把buffer的数据写向各个tunnel fd。
 	     *
