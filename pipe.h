@@ -100,9 +100,11 @@ void destroyPipeList( PipeList * );
 int isPipeListEmpty( PipeList * );
 int isPipeListFull( PipeList * );
 
+int getAEmptyPipe( PipeList * pl );
 int addPipe( PipeList * , Pipe *, Pipe ** );
 int delPipe( PipeList * , Pipe * );
 int delPipeByKey( PipeList * , char * );
+void delPipeByI( PipeList * , int );
 Pipe * searchPipeByKey( PipeList *, char * );
 //Pipe * searchByTunFd( PipeList * pl, int fd );
 

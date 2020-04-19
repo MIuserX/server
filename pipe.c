@@ -902,6 +902,34 @@ int isPipeListFull( PipeList * pl ) {
 
 /*
  * == return ==
+ * 一个下标。
+ *  >=0: 
+ *   -1: full
+ *   -2: memory not enough
+ *   -3: code error
+ */
+int getAEmptyPipe( PipeList * pl ) {
+    int i;
+    assert( pl != NULL );
+    
+    if ( isPipeListFull( pl ) ) {
+        return -1;
+    }
+
+    for ( i = 0; i < P_LIST_SZ; i++ ) {
+        if ( !(pl->pipes[i].use) ) {
+	    if ( initPipe( pl + i, P_BUFF_SZ, TUN_LIST_SZ ) ) {
+	        return -2;
+	    }
+	    pl->pipes[i].use = 1;
+	    return pl + i;
+	}
+    }
+    return -3;
+}
+
+/*
+ * == return ==
  *  0: success
  * -1: pipe list is full
  */
@@ -984,6 +1012,15 @@ int delPipeByFd( PipeList * pl, int fd ) {
     return -2;
 }
 
+void delPipeByI( PipeList * pl, int i ) {
+    assert( pl != NULL );
+
+    if ( pl->pipes[i].use ) {
+        destroyPipe( pl->pipes + i );
+        pl->pipes[i].use = 0;
+        pl->sz -= 1;
+    }
+}
 
 Pipe * searchPipeByKey( PipeList * pl, char * key) {
     int i;
@@ -997,7 +1034,7 @@ Pipe * searchPipeByKey( PipeList * pl, char * key) {
 
     for ( i = 0; i < P_LIST_SZ; i++ ) {
         if ( pl->pipes[i].use && 0 == memcmp( (void *)(pl->pipes[i].key), (void *)key, P_KEY_SZ ) ) {
-	    //printf("==> searchPipeByKey i=%d\n", i);
+	    printf("==> searchPipeByKey i=%d\n", i);
 	    return pl->pipes + i;
 	}
     }
