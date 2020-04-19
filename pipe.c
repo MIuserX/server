@@ -596,19 +596,28 @@ static int buffToTun( Pipe * p ) {
 
     // 把每个tunnel fd的发送状态都推进一遍
     for ( i = 0; i < p->tun_list.len; i++ ) {
+	printf("debug[%s:%d]: buffToTun i=%d fd=%d\n", 
+			__FILE__, __LINE__, 
+			i, p->tun_list.tuns[i].fd);
 	loop = 1;
 	while ( loop ) {
             switch ( p->tun_list.tuns[i].w_stat ) {
                 case TUN_W_INIT:
 		    printf("debug[%s:%d]: TUN_W_INIT\n", __FILE__, __LINE__);
-	            if ( ( ! hasDataToTun( p ) ) 
-			    && p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ 
-			    && p->stat != P_STAT_ENDING1 ) { 
+	            if ( !( hasDataToTun( p ) || p->stat == P_STAT_ENDING1 ) 
+			    || p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) {
 		        // 如果没有 active data 和 ack 可发就break
 			// 如果已发送且未收到ack的packet数大于P_PREV_SEND_MAXSZ就break
 			// 如果没有FIN需要发，就break
 			loop = 0;
 			break;
+		    }
+		    if ( hasDataToTun( p ) ) {
+		        printf("debug[%s:%d]: hasDataToTun\n", __FILE__, __LINE__);
+			dumpBuff( &(p->fd2tun) );
+		        printf("debug[%s:%d]: p->unsend_count=%d\n", 
+					__FILE__, __LINE__, 
+					p->unsend_count);
 		    }
 
                     //==== 组装packet ====
