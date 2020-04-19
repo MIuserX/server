@@ -646,7 +646,7 @@ static int buffToTun( Pipe * p ) {
 
 			if ( p->last_send_seq == 0 ) {
 		            p->last_send_seq = random() % 66 + 1;
-			    p->last_send_ack = p->last_send_seq - 1;
+			    p->last_send_ack = p->last_send_seq;
 			    packet_->head.flags |= ACTION_SYN;
 			}
                         packet_->head.x_seq = ( ++(p->last_send_seq) );
