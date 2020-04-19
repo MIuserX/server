@@ -16,6 +16,7 @@
 #define TUN_SEND_AP (4) // [c]  已发送 auth packet
 #define TUN_RECV_AP (5) // [s]  已接收 auth packet，正在处理
 #define TUN_REPLIED (6) // [s]  正在向 client 回复 auth result
+#define TUN_CLOSED  (7) // [c|s] 收到c|s，
 
 #define TUN_W_INIT    (31) // send_seg is empty
 #define TUN_W_SEND    (32) // sending data
@@ -24,7 +25,6 @@
 #define TUN_R_DATA    (43) // 正在读取packet data部分
 #define TUN_R_FULL    (44) // 读取完毕，做一些处理
 #define TUN_R_MOVE    (45) // 正在转移数据
-#define TUN_R_STOP    (46) // packet队列过长，暂停读取
 
 typedef struct tunnel {
     char if_name[36];  // network interface name
@@ -52,6 +52,8 @@ typedef struct tunnel_list {
 
     // 负载均衡策略：目前用简单的轮询
     int      cur_idx; // 当前使用的tunnel的数组下标
+
+    int      sending_count; // 处于发送状态的tunnel数
 } TunList;
 
 int initTunList( TunList *, size_t );
