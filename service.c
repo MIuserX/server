@@ -10,6 +10,7 @@
 #include <sys/ioctl.h>
 #include <pthread.h>
 
+#include "tunnel.h"
 #include "pipe.h"
 #include "auth.h"
 #include "server.h"
@@ -261,7 +262,7 @@ static void _set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
     }
 }
 
-static void _set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
+static void _set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall) {
     int i;
 
     assert( p != NULL );
@@ -270,7 +271,13 @@ static void _set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
     for ( i = 0; i < p->tun_list.sz; i++ ) {
 	// ! is_out && TRUE => set
 	// is_out && FALSE  => unset
-        if ( !( p->tun_list.tuns[i].flags & FD_IS_EPOLLOUT ) && x ) {
+	
+	// x                                             : 设置EPOLLOUT
+	// setall                                        : 所有fd都设置EPOLLOUT
+	// (p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) : fd遭遇write block
+	// !( p->tun_list.tuns[i].flags                  : 未监听EPOLLOUT
+        if ( !( p->tun_list.tuns[i].flags & FD_IS_EPOLLOUT ) && x && 
+			( setall || (p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) ) ) {
             ep->ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
             ep->ev.data.fd = p->tun_list.tuns[i].fd;
             if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
@@ -280,7 +287,12 @@ static void _set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
 
             p->tun_list.tuns[i].flags |= FD_IS_EPOLLOUT;
         }
-        if ( ( p->tun_list.tuns[i].flags & FD_IS_EPOLLOUT ) && !x ) {
+	
+	// !x                                              : 取消EPOLLOUT
+	// ! (p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) : fd未遭遇write block
+	// !( p->tun_list.tuns[i].flags & FD_IS_EPOLLOUT ) : 在监听EPOLLOUT
+        if ( ( p->tun_list.tuns[i].flags & FD_IS_EPOLLOUT ) && !x && 
+			( ! (p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) ) ) {
             ep->ev.events = EPOLLIN | EPOLLET;
             ep->ev.data.fd = p->tun_list.tuns[i].fd;
             if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
@@ -301,40 +313,47 @@ static void _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     while ( 1 ) {
 	printf("debug[%s:%d]: _relay_fd_to_tun read client fd", __FILE__, __LINE__ );
         //==== 从client fd读
-        if ( ! isBuffFull( &(p->fd2tun) ) ) {
-            rt = stream( P_STREAM_FD2BUFF, p, evt_fd );
-            switch ( rt ) {
-                case 3: // service ending
-                    break;
-
-                case 1: // buffer is full
-                    p->fd_flags |= FD_HAS_UNREAD;
-                    break;
-
-                case 0: // socket block
-                    p->fd_flags &= ( ~FD_HAS_UNREAD );
-                    rblock = 'y';
-                    break;
-
-		case -1:// errors
-                    dprintf(2, "Error[%s:%d]: mapping fd %d, errno=%d %s\n",
-                                __FILE__, __LINE__,
-                                evt_fd,
-                                errno, strerror(errno));
+	// 前提：
+	//   fd not closed
+	//
+	// 结果：
+	//   (1) buffer is full (socket non-block)
+	//   (2) socket block (buffer is not full)
+        rt = stream( P_STREAM_FD2BUFF, p, evt_fd );
+        switch ( rt ) {
+	    case 2: // socket closed
+                if ( ! isBuffEmpty( &(p->tun2fd) ) ) {
+                    dprintf(2, "Error[%s:%d]: client fd %d closed, but tun2fd has data", __FILE__, __LINE__, p->fd);
                     client_pthread_exit( -2, p, ep );
-            }
-        }
-        // 正常情况下，到了这里，会有两种情况：
-        // (1) rblock == 'y'
-        // (2) buffer is full
-        // 无论(1)或(2)，都要去尝试往对端写一下。
-        // 如果能写出去一点，对于(2)，还能再读点。
+	        }
+            case 0: // socket block
+                rblock = 'y';
+                break;
 
+	    case -1:// errors
+                dprintf(2, "Error[%s:%d]: mapping fd %d, errno=%d %s\n",
+                            __FILE__, __LINE__,
+                            evt_fd,
+                            errno, strerror(errno));
+                client_pthread_exit( -2, p, ep );
+        }
+    
 	printf("debug[%s:%d]: _relay_fd_to_tun write tunnel fds", __FILE__, __LINE__ );
         //==== 往tunnels写
+	// 前提：
+	//   有数据可写：
+	//     (1) fd2tun has active data
+	//     (2) 需要给对方回复ack
+	//
+	// 结果：
+        // (1) wblock == 'y' && buffer is full
+        // (2) wblock == 'y' && buffer is not full
+        // (3) wblock == 'n' && buffer is empty
+        // 对于(2)和(3)，就要去尝试下再去读，消耗读事件。
+        // 但如果读事件已经碰到rblock了，就不用再循环下去了。
         rt = stream( P_STREAM_BUFF2TUN, p, evt_fd );
         switch ( rt ) {
-            case 2: // service ending
+            case -1: // 
                 dprintf(2, "Error[%s:%d]: client socket fd %d, errno=%d %s\n",
                             __FILE__, __LINE__,
                             evt_fd,
@@ -342,21 +361,26 @@ static void _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
                 client_pthread_exit( -2, p, ep );
                 break;
 
-            case 41: // 消耗了fd2tun的一些bytes
-                p->tun_flags &= ( ~FD_HAS_UNWRITE );
-                break;
-
-            case 40: // 未消耗fd2tun的bytes
-                p->tun_flags |= FD_HAS_UNWRITE;
+            case 40:
                 wblock = 'y'; //写不动了，有可能socket block，有可能到了未ack发包极限
                 break;
+
+            //case 41: 
+	    //
         }
-        // 正常情况下，到了这里，会有3种情况：
-        // (1) wblock == 'y' && buffer is full
-        // (2) wblock == 'y' && buffer is not full
-        // (3) wblock == 'n' && buffer is empty
-        // 对于(2)和(3)，就要去尝试下再去读，消耗读事件。
-        // 但如果读事件已经碰到rblock了，就不用再循环下去了。
+
+        /* 处理 fd closed 的情况。
+         *
+         * (1) fd 端已完成数据收发，确认要关闭了。
+         * (2) fd 端因为非正常关闭。
+         * 
+         * 但作为一个中专，我们不管这些，我们只是关闭。
+         *
+         */
+        if ( p->fd_flags & FD_CLOSED && ( ! hasDataToTun( p ) ) && ( ! hasUnAckData( &(p->fd2tun) ) ) ) {
+            p->stat = P_STAT_END;
+	    break;
+        }
 
         if ( rw == 'r' ) { // client fd met read event
             /* 尽力把client fd读到block。
@@ -368,24 +392,26 @@ static void _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	    if ( rblock == 'n' && ( ! isBuffFull( &(p->fd2tun) ) ) ) {
 	        continue;
 	    }
+	    break;
 	}
 	else { // rw == 'w': tunnel fds met write event
 	    if ( wblock == 'n' && hasDataToTun( p ) ) {
 	        continue;
 	    }
+	    break;
 	}
     }
 
-    if ( hasDataToTun( p ) ) { 
-        //==== case 2
+    if ( hasDataToTun( p ) ) {
         printf("warning[%s:%d]: buffer中存有数据待发\n", __FILE__, __LINE__ );
-	
-	// 读取不了，缓冲区满，根本原因是 tunnel fds 写不了。
-	// 所以监听 EPOLLOUT 事件。
-	_set_tun_out_listen( p, ep, TRUE );
+	_set_tun_out_listen( p, ep, TRUE, TRUE );
+    }
+    else if ( p->tun_list.sending_count > 0 ) {
+        // 尝试为哪些碰到write block的fd设置EPOLLOUT
+        _set_tun_out_listen( p, ep, TRUE, FALSE );
     }
     else {
-	_set_tun_out_listen( p, ep, FALSE );
+	_set_tun_out_listen( p, ep, FALSE, FALSE );
     }
 }
 
@@ -399,37 +425,46 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     assert( ep != NULL );
 
     while ( 1 ) {
-	if ( rw == 'r' ) {
-            //==== 从tunnels读
-	    if ( ! isBuffFull( &(p->tun2fd) ) ) {
-                rt = stream( P_STREAM_TUN2BUFF, p, evt_fd );
-                switch ( rt ) {
-                    case -1: // service ending
-                        dprintf(2, "Error[%s:%d]: tunnel socket fd %d, errno=%d %s\n", 
-                        		__FILE__, __LINE__, 
-                        		evt_fd,
-                        		errno, strerror(errno));
-                        client_pthread_exit( -2, p, ep );
-                        break;
+        //==== 从tunnels读
+        rt = stream( P_STREAM_TUN2BUFF, p, evt_fd );
+        switch ( rt ) {
+            case -1: // errors
+            case -66:
+                dprintf(2, "Error[%s:%d]: tunnel socket fd %d, errno=%d %s\n", 
+                		__FILE__, __LINE__, 
+                		evt_fd,
+                		errno, strerror(errno));
+                client_pthread_exit( -2, p, ep );
+                break;
 
-                    case 1: // buffer空间可能不足，不读了
-                        p->tun_flags |= FD_HAS_UNREAD;
-                        bblock = 'y';
-	    	        break;
+            case 32: 
+		// Tunnel对端发送了FIN，证明：
+		//   (1) 对端的fd已关闭
+		//   (2) 对端已向我方发送完了数据并收到了我方的ack
+		//
+		// 这时，我方仍需要将tun2fd的数据发送给我方的fd。
+		if ( hasDataToTun( p ) || p->tun_list.sending_count > 0 ) {
+                    dprintf(2, "Error[%s:%d]: 还有数据未发送完毕，Tunnel对端结束\n", __FILE__, __LINE__ );
+		}
+		if ( p->prev_seglist.len > 0 ) {
+                    dprintf(2, "Error[%s:%d]: Tunnel对端结束，prev_seglist里还有数据\n", __FILE__, __LINE__ );
+		}
+		p->tun_closed = 'y';
+	    case 30: // socket block
+		rblock = 'y';
+                break;
 
-                    case 0: // socket block
-                        p->fd_flags |= FD_HAS_UNWRITE;
-                        rblock = 'y';
-	        	break;
-                }
-	    }
-	}
+            case 31: // buffer空间可能不足，不读了
+                bblock = 'y';
+	        break;
+        }
 
         //==== 向client fd写
         if ( ! isBuffEmpty( &(p->tun2fd) ) ) {
             rt = stream( P_STREAM_BUFF2FD, p, p->fd );
             switch ( rt ) {
-                case 2: // service ending
+                case -1: // errors
+                case -66:
                     dprintf(2, "Error[%s:%d]: client socket fd %d, errno=%d %s\n", 
                     		__FILE__, __LINE__, 
                     		p->fd,
@@ -437,16 +472,23 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
                     client_pthread_exit( -2, p, ep );
                     break;
 
+                case 22: // 消耗了tun2fd的bytes
+		    bblock = 'n';
+		    break;
+
                 case 21: // 消耗了tun2fd的bytes
-                    p->fd_flags &= ( ~FD_HAS_UNWRITE );
                     bblock = 'n';
+		    wblock = 'y';
 		    break;
 
                 case 20: // 未消耗tun2fd的bytes
-                    p->fd_flags |= FD_HAS_UNWRITE;
                     wblock = 'y';
 	    	    break;
             }
+	}
+
+	if ( p->tun_closed == 'y' && isBuffEmpty( &(p->tun2fd) ) ) {
+	    p->stat = P_STAT_END;
 	}
 
         if ( rw == 'r' ) { // a tunnel fd met read event
@@ -460,11 +502,13 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	    if ( rblock == 'n' && ( ! isBuffFull( &(p->tun2fd) ) ) && bblock == 'n' ) {
 	        continue;
 	    }
+	    break;
 	}
 	else { // rw == 'w': client fd met write event
             if ( wblock == 'n' && ( ! isBuffEmpty( &(p->tun2fd) ) ) ) {
 	        continue;
 	    }
+	    break;
 	}
     }
     
@@ -593,6 +637,12 @@ void * client_pthread( void * p ) {
 		    }
 	        }
 	    }
+	}
+
+	//== 看 pipe 是否要终结
+	if ( pp.stat == P_STAT_END ) {
+            printf("Info[%s:%d]: pipe[%8s] end\n", __FILE__, __LINE__, pp.key );
+	    break;
 	}
     }
 
