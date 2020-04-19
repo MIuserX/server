@@ -99,6 +99,7 @@ void destroyBuff( Buffer * );
 
 int isBuffEmpty( Buffer * );
 int hasActiveData( Buffer * );
+int hasUnAckData( Buffer * );
 int isBuffFull( Buffer * );
 
 void setBuffSize( Buffer *, size_t );
