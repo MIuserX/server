@@ -602,7 +602,6 @@ void * client_pthread( void * p ) {
 	        printf("Info[%s:%d]: auth to server failed\n", __FILE__, __LINE__ );
                 client_pthread_exit( -4, &pp, &ep );
 	    }
-	    continue;
 	}
 
         //== 碰到epoll事件就处理事件
@@ -637,6 +636,12 @@ void * client_pthread( void * p ) {
 	                _relay_fd_to_tun( &pp, ep.evs[i].data.fd, &ep, 'w' );
 		    }
 	        }
+	    }
+	    else {
+		if ( ep.evs[i].events & EPOLLIN ) {
+                    printf("debug[%s:%d]: client fd %d: r event\n", __FILE__, __LINE__, ep.evs[i].data.fd );
+	            _relay_fd_to_tun( &pp, ep.evs[i].data.fd, &ep, 'r' );
+		}
 	    }
 	}
 
