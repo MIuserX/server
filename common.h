@@ -7,12 +7,8 @@
 #define TRUE  (1)
 #define FALSE (0)
 
-#define    BUF_SIZE     1024
-#define    MAXLINE      1024
 #define    MAXBACK      1000
-#define    MAX_CLI_CONN 16
-#define    MAX_PATH     4
-#define    MAXEPOLL     256    /* 对于服务器来说，这个值可以很大的！ */
+#define    MAXEPOLL     1024    /* 对于服务器来说，这个值可以很大的！ */
 
 // pipe key size
 #define P_KEY_SZ (16)
@@ -21,7 +17,7 @@
 #define TUN_LIST_SZ (2) // wire and wireless NIC
 
 // server pipe list max length
-#define P_LIST_SZ (4)
+#define P_LIST_SZ (64)
 
 // pipe's buffer size, every pipe has two buffers
 #define P_BUFF_SZ (40960)
