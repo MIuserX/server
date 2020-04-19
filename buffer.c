@@ -126,10 +126,7 @@ static int nextWritePos( Buffer * b ) {
 int hasUnAckData( Buffer * b ) {
     assert( b != NULL ); 
 
-    if ( isLineEmpty( &(b->buff2segs) ) ) {
-        return 1;
-    }
-    return 0;
+    return ! isLineEmpty( &(b->buff2segs) );
 }
 
 /*
