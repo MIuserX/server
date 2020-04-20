@@ -197,7 +197,9 @@ void destroyBuff( Buffer * b ) {
     assert( b != NULL );
     
     destroyLine( &(b->buff2segs) );
-    free( b->buff );
+    if ( b->buff ) {
+        free( b->buff );
+    }
     bzero( (void *)b, sizeof( Buffer ) );
 }
 
