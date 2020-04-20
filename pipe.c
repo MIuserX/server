@@ -481,8 +481,8 @@ static int _tunToBuff( int i, Pipe * p ) {
 		    else if ( ph->x_ack > p->last_send_ack + 1 ) {
                         //printf("debug[%s:%d]: prev x_ack=%u, last_send_ack=%u\n", 
 			//		__FILE__, __LINE__, 
-					ph->x_ack, 
-					p->last_send_ack);
+			//		ph->x_ack, 
+			//		p->last_send_ack);
 		        if ( seqInLine( &(p->prev_acklist), (void *)&(ph->x_ack), sizeof(ph->x_ack), ackCmp ) ) {
 		            return -3;
 			}
