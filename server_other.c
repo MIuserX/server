@@ -49,7 +49,7 @@ int getAEmptyFn( FdList * fl ) {
         ++i;
     }
     if ( i < MAX_FDS ) {
-	fl->nodes[i].use = 1;
+	fl->fds[i].use = 1;
 	fl->sz++;
         return i;
     }
@@ -105,9 +105,10 @@ int delFd( FdList * fl, int fd ) {
 
     for ( i = 0; i < MAX_FDS; i++ ) {
         if ( fl->fds[i].fd == fd && fl->fds[i].use != 0 ) {
-	    if ( fl->fds[i].fd >= 0 ) {
+	    if ( fd >= 0 ) {
 	        close( fd );
 	    }
+	    destroyBuff( &(fl->fds[i].bf)  );
             bzero( (void *)(fl->fds + i), sizeof(FdNode) );
             fl->fds[i].fd = -1;
 	    fl->sz -= 1;
