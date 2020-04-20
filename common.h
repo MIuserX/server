@@ -16,6 +16,9 @@
 // tunnel list max length
 #define TUN_LIST_SZ (2) // wire and wireless NIC
 
+// tunnel move-buffer size
+#define TUN_BUFF_SZ (4096)
+
 // server pipe list max length
 #define P_LIST_SZ (64)
 

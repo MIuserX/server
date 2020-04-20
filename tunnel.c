@@ -22,9 +22,17 @@ int initTunnel( Tunnel * t ) {
     t->status = TUN_INIT;
     t->r_stat = TUN_R_INIT;
     t->w_stat = TUN_W_INIT;
-    if ( initBuff( &(t->r_seg), sizeof(Packet), BUFF_MD_2FD ) ||
-            initBuff( &(t->w_seg), sizeof(Packet), BUFF_MD_2FD ) ) {
+    if ( initBuff( &(t->r_seg), sizeof(Packet), BUFF_MD_2FD ) ) {
         return -1;
+    }
+    if ( initBuff( &(t->w_seg), sizeof(Packet), BUFF_MD_2FD ) ) {
+        destroyBuff( &(t->r_seg) );
+	return -1;
+    }
+    if ( initBuff( &(t->move_seg), TUN_BUFF_SZ, BUFF_MD_2FD ) ) {
+        destroyBuff( &(t->r_seg) );
+        destroyBuff( &(t->w_seg) );
+	return -1;
     }
     return 0;
 }
@@ -42,6 +50,7 @@ void destroyTunnel( Tunnel * t ) {
 
     destroyBuff( &(t->r_seg) );
     destroyBuff( &(t->w_seg) );
+    destroyBuff( &(t->move_seg) );
 }
 
 /*

@@ -34,6 +34,7 @@ typedef struct tunnel {
 
     int    r_stat;   // 读状态
     Buffer r_seg;    // 接收 packet
+    Buffer move_seg; // 转移收到的数据到buffer
 
     int    w_stat;   // 写状态
     Buffer w_seg;    // 发送 pakcet
