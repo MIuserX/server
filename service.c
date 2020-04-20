@@ -745,7 +745,7 @@ void * client_pthread( void * p ) {
  *     nread == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)
  *     或者
  *     nwrite == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)
- * -1: all error, see errno
+ * -1: see errno (memory; socket errors)
  * 
  */
 int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping_addr, FdList * fd_list ) {
@@ -763,14 +763,14 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
     while ( 1 ) {
         switch ( fn->auth_status ) {
             case TUN_ACTIVE: // read auth packet
-                printf("debug[%s:%d]: read auth packet => go\n", __FILE__, __LINE__);
+                //printf("debug[%s:%d]: read auth packet => go\n", __FILE__, __LINE__);
                 while ( ! isBuffFull( &(fn->bf) ) ) {
                     want_sz = 0;
 		    rt = putBytesFromFd( &(fn->bf), fn->fd, &want_sz );
                     if ( isBuffFull( &(fn->bf) ) ) {
                         // buffer is full
             	        fn->auth_status = TUN_RECV_AP;
-                        printf("debug[%s:%d]: read auth packet => ok\n", __FILE__, __LINE__);
+                        //printf("debug[%s:%d]: read auth packet => ok\n", __FILE__, __LINE__);
                         break;
                     }
 
@@ -788,12 +788,12 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                 break;
             
             case TUN_RECV_AP: //==== auth
-                printf("debug: auth packet => go\n");
+                //printf("debug: auth packet => go\n");
                 *ecode = 0;
                 ap = (AuthPacket *)(fn->bf.buff);
                 switch ( ap->code ) {
                     case AUTH_NEW:
-                        printf("debug[%s:%d]: new pipe, key=\"%16s\"\n", __FILE__, __LINE__, ap->key);
+                        printf("Info[%s:%d]: new pipe, key=\"%16s\"\n", __FILE__, __LINE__, ap->key);
                         p = searchPipeByKey( pl, ap->key );
                         if ( p ) {
                             ap->code = (*ecode) = AUTH_KEY_USED;
@@ -816,10 +816,10 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
 				delPipeByI( pl, idx );
                                 ap->code = (*ecode) = AUTH_SERV_ERR;
                                 dprintf(2, "Error[%s:%d]: connect mapping addr failed, errno=%d, %s\n", __FILE__, __LINE__, errno, strerror(errno));
-			        return 2;
+			        return -1;
 			    }
                             else { 
-                                printf("debug[%s:%d]: mapping fd = %d\n", __FILE__, __LINE__, new_p->fd);
+                                //printf("debug[%s:%d]: mapping fd = %d\n", __FILE__, __LINE__, new_p->fd);
 				fdnode.use = 1;
                                 fdnode.fd = new_p->fd;
                                 fdnode.type = FD_MERGE1;
@@ -843,7 +843,7 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                         break;
 
                     case AUTH_JOIN:
-                        printf("debug[%s:%d]: join pipe, key=\"%16s\"\n", __FILE__, __LINE__, ap->key);
+                        printf("Info[%s:%d]: join pipe, key=\"%16s\"\n", __FILE__, __LINE__, ap->key);
                         p = searchPipeByKey( pl, ap->key );
                         if ( ! p ) {
                             ap->code = (*ecode) = AUTH_NO_KEY;
@@ -854,7 +854,7 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                     	    if ( joinTunList( &(p->tun_list), fn->fd ) ) {
                                 ap->code = (*ecode) = AUTH_TUN_FULL;
                     	    } else {
-                                printf("debug[%s:%d]: join pipe successfully, p=%p\n", __FILE__, __LINE__, p);
+                                printf("Info[%s:%d]: join pipe successfully, p=%p\n", __FILE__, __LINE__, p);
 			    }
                         }
                         break;
@@ -871,20 +871,20 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                 break;
 
             case TUN_REPLIED: // reply to client
-                printf("debug: reply to client => go\n");
+                //printf("debug: reply to client => go\n");
                 ap = (AuthPacket *)(fn->bf.buff);
                 while ( ! isBuffEmpty( &(fn->bf) ) ) {
                     rt = getBytesToFd( &(fn->bf), fn->fd );
-                    if ( rt == 1 && isBuffEmpty( &(fn->bf) ) ) {
+                    if ( rt == 1 ) {
                         // sent successfully
-                        printf("debug: reply to client => ok\n");
+                        //printf("debug: reply to client => ok\n");
                         break;
                     }
 
                     if ( rt == -1 ) {
                         dprintf(2, "error[%s:%d]: reply to client failed\n", __FILE__, __LINE__);
                     }
-                    printf("debug: reply to client => error\n");
+                    //printf("debug: reply to client => error\n");
 
                     return rt; // 0, -1
                 }

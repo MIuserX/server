@@ -15,6 +15,19 @@ void initFdList( FdList * fl ) {
     bzero( (void *)(fl->fds), sizeof(FdNode) * MAX_FDS );
 }
 
+static void cleanFdNode( FdNode * fn ) {
+    assert( fn != NULL );
+
+    fn->use = 0;
+    fn->fd = -1;
+    fn->type = FD_UNKNOWN;
+    fn->flags = 0;
+    //fn->auth_status = ;
+    fn->auth_ok = 0;
+    fn->t = 0;
+    fn->p = NULL;
+}
+
 void destroyFdList( FdList * fl ) {
     int i;
 
@@ -108,9 +121,12 @@ int delFd( FdList * fl, int fd ) {
 	    if ( fd >= 0 ) {
 	        close( fd );
 	    }
-	    destroyBuff( &(fl->fds[i].bf)  );
-            bzero( (void *)(fl->fds + i), sizeof(FdNode) );
-            fl->fds[i].fd = -1;
+            printf("debug[%s:%d]: after close(fd)\n", __FILE__, __LINE__);
+	    if ( fl->fds[i].flags & FDNODE_BUFF ) {
+	        destroyBuff( &(fl->fds[i].bf) );
+	    }
+            printf("debug[%s:%d]: after destroyBuff\n", __FILE__, __LINE__);
+            cleanFdNode( fl->fds + i );
 	    fl->sz -= 1;
 	    return 0;
         }
