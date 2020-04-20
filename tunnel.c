@@ -125,7 +125,7 @@ int exitTunList( TunList * tun_list, int fd ) {
 	    tun_list->tuns[i].fd = -1;
 	    tun_list->tuns[i].status = TUN_INIT;
 	    tun_list->sz -= 1;
-	    return 0
+	    return 0;
 	}
     }
 
