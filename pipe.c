@@ -409,7 +409,7 @@ static int _tunToBuff( int i, Pipe * p ) {
                             t->r_stat = TUN_R_FULL;
     	                }
 			else {
-                            printf("debug[%s:%d]:   PSH, x_seq=%u\n", __FILE__, __LINE__, ph->x_seq);
+                            //printf("debug[%s:%d]:   PSH, x_seq=%u\n", __FILE__, __LINE__, ph->x_seq);
         	            t->r_stat = TUN_R_DATA;
 			}
 		    }
@@ -420,7 +420,7 @@ static int _tunToBuff( int i, Pipe * p ) {
     	        /* 正在读packet的数据
 		 *
 		 */
-                printf("debug[%s:%d]: TUN_R_DATA\n",  __FILE__, __LINE__);
+                //printf("debug[%s:%d]: TUN_R_DATA\n",  __FILE__, __LINE__);
     	        ph = ( PacketHead *)( t->r_seg.buff );
                 want_sz = ph->sz - t->r_seg.sz;
         	rt = putBytesFromFd( &(t->r_seg), t->fd, &want_sz );
@@ -446,7 +446,7 @@ static int _tunToBuff( int i, Pipe * p ) {
             case TUN_R_FULL:
     	        // packet已读完整，尝试向tun2fd这个buffer转移，
     	        // 转移之前要抛弃缓冲区前面的PachetHead。
-                printf("debug[%s:%d]: TUN_R_FULL\n",  __FILE__, __LINE__);
+                //printf("debug[%s:%d]: TUN_R_FULL\n",  __FILE__, __LINE__);
     	    
     	        ph = ( PacketHead *)( t->r_seg.buff);
     	        if ( ph->flags & ACTION_ACK ) {
@@ -461,8 +461,8 @@ static int _tunToBuff( int i, Pipe * p ) {
 		    if ( ph->x_ack == p->last_send_ack + 1 ) {
     	                ackBytes( &(p->fd2tun), ph->x_ack );
 			p->last_send_ack = ph->x_ack;
-                        printf("debug[%s:%d]: ackBytes x_ack=%u \n", 
-					__FILE__, __LINE__, ph->x_ack);
+                        //printf("debug[%s:%d]: ackBytes x_ack=%u \n", 
+			//		__FILE__, __LINE__, ph->x_ack);
 
 			while ( p->prev_acklist.len > 0 ) {
 			    pu = getHeadPtr( &(p->prev_acklist) );
@@ -470,17 +470,17 @@ static int _tunToBuff( int i, Pipe * p ) {
     	                        ackBytes( &(p->fd2tun), *pu );
 			        p->last_send_ack = (*pu);
 			        justOutLine( &(p->prev_acklist) );
-                                printf("debug[%s:%d]: ackBytes x_ack=%u \n", 
-						__FILE__, __LINE__, *pu);
+                                //printf("debug[%s:%d]: ackBytes x_ack=%u \n", 
+				//		__FILE__, __LINE__, *pu);
 			    }
-			    else {
-			        break;
+			    else if ( *pu < p->last_send_ack + 1 ) {
+			        justOutLine( &(p->prev_acklist) );
 			    }
 			}
 		    }
 		    else if ( ph->x_ack > p->last_send_ack + 1 ) {
-                        printf("debug[%s:%d]: prev x_ack=%u, last_send_ack=%u\n", 
-					__FILE__, __LINE__, 
+                        //printf("debug[%s:%d]: prev x_ack=%u, last_send_ack=%u\n", 
+			//		__FILE__, __LINE__, 
 					ph->x_ack, 
 					p->last_send_ack);
 		        if ( seqInLine( &(p->prev_acklist), (void *)&(ph->x_ack), sizeof(ph->x_ack), ackCmp ) ) {
@@ -501,16 +501,21 @@ static int _tunToBuff( int i, Pipe * p ) {
     	            discardBytes( &(t->r_seg), &want_sz );
 		    t->r_stat = TUN_R_MOVE;
 		}
+
+		if ( t->r_stat == TUN_R_FULL ) {
+                    printf("Error[%s:%d]: bad packet head\n",  __FILE__, __LINE__);
+    	            t->r_stat = TUN_R_INIT;
+		}
     	        break;
 
     	    case TUN_R_MOVE:
     	        // packet已读完整，尝试将packet data向tun2fd这个buffer转移。
-                printf("debug[%s:%d]: TUN_R_MOVE\n",  __FILE__, __LINE__);
+                //printf("debug[%s:%d]: TUN_R_MOVE\n",  __FILE__, __LINE__);
     	        
 		ph = ( PacketHead *)( t->r_seg.buff);
                 
-		printf("debug[%s:%d]: 待转移的packet如下：\n",  __FILE__, __LINE__);
-    	        dumpBuff( &(t->r_seg) );
+		//printf("debug[%s:%d]: 待转移的packet如下：\n",  __FILE__, __LINE__);
+    	        //dumpBuff( &(t->r_seg) );
        	        
 		if ( ph->x_seq == p->last_recv_seq + 1 ) {
 	            //==> 收到了想要的packet
@@ -523,8 +528,8 @@ static int _tunToBuff( int i, Pipe * p ) {
     	            switch ( rt ) {
     		        case 0:
     		            if ( isBuffEmpty( &(t->r_seg) ) ) {
-                                printf("debug[%s:%d]: 转移完成后tun2fd情况：\n",  __FILE__, __LINE__);
-    	                        dumpBuff( &(p->tun2fd) );
+                                //printf("debug[%s:%d]: 转移完成后tun2fd情况：\n",  __FILE__, __LINE__);
+    	                        //dumpBuff( &(p->tun2fd) );
     		                
 		        	usa.sending = 'n';
 		        	usa.seq = ph->x_seq;
@@ -533,7 +538,7 @@ static int _tunToBuff( int i, Pipe * p ) {
 		        	}
 		        	p->unsend_count++;
 		        
-                                printf("debug[%s:%d]: p->unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count);
+                                //printf("debug[%s:%d]: p->unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count);
 		        	p->last_recv_seq = ph->x_seq;
     		            } 
 		    	    else {
