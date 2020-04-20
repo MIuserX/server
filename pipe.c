@@ -350,17 +350,17 @@ static int _tunToBuff( int i, Pipe * p ) {
     PacketHead *   ph;
     PacketHead *   phead;
     UnSendAck      usa;
+    Tunnel       * t = p->tun_list.tuns + i;
     
     assert( p != NULL );
 
     while ( 1 ) {
-        switch ( p->tun_list.tuns[i].r_stat ) {
+        switch ( t->r_stat ) {
             case TUN_R_INIT:
 		/* 正在读packet的head
 		 *
-		 *
 		 */
-                if ( p->tun_list.tuns[i].status == TUN_CLOSED ) {
+                if ( t->status == TUN_CLOSED ) {
 		    return 2;
 		}
 
@@ -368,13 +368,13 @@ static int _tunToBuff( int i, Pipe * p ) {
                     return 1;
                 }
 
-    	        cleanBuff( &(p->tun_list.tuns[i].r_seg) );
+    	        cleanBuff( &(t->r_seg) );
                     
     	        // 读取PacketHead时也可能中途遇到socket block，
     	        // 所以这里待读取size是，PacketHead size减去已读取size。
-                want_sz = PACKET_HEAD_SZ - p->tun_list.tuns[i].r_seg.sz;
-        	rt = putBytesFromFd( &(p->tun_list.tuns[i].r_seg), p->tun_list.tuns[i].fd, &want_sz );
-                printf("debug[%s:%d]: after rt=%d want_sz=%lu\n",  __FILE__, __LINE__, rt, want_sz);
+                want_sz = PACKET_HEAD_SZ - t->r_seg.sz;
+        	rt = putBytesFromFd( &(t->r_seg), t->fd, &want_sz );
+                //printf("debug[%s:%d]: after rt=%d want_sz=%lu\n",  __FILE__, __LINE__, rt, want_sz);
         	switch ( rt ) {
         	    case -1: // socket closed
                     case -2: // socket error
@@ -387,29 +387,30 @@ static int _tunToBuff( int i, Pipe * p ) {
         		return -4;
         	}
 
-	        if ( PACKET_HEAD_SZ == p->tun_list.tuns[i].r_seg.sz ) {
-    	            ph = ( PacketHead *)( p->tun_list.tuns[i].r_seg.buff);
+	        if ( PACKET_HEAD_SZ == t->r_seg.sz ) {
+    	            ph = ( PacketHead *)( t->r_seg.buff);
 		    if ( ph->flags & ACTION_FIN ) {
-                        p->tun_list.tuns[i].status = TUN_CLOSED;
-                        p->tun_list.tuns[i].r_stat = TUN_R_INIT;
+                        t->status = TUN_CLOSED;
+                        t->r_stat = TUN_R_INIT;
 		    }
 		    else {
-                        printf("debug[%s:%d]: 读取完PacketHead: \n", __FILE__, __LINE__);
+                        //printf("debug[%s:%d]: 读取完PacketHead: \n", __FILE__, __LINE__);
 		        if ( ph->flags & ACTION_SYN ) {
-                            printf("debug[%s:%d]:   SYN\n", __FILE__, __LINE__);
+                            //printf("debug[%s:%d]:   SYN\n", __FILE__, __LINE__);
 			    p->last_recv_seq = ph->x_seq - 1;
 			    p->last_recv_ack = ph->x_seq - 1;
 			}
 		        if ( ph->flags & ACTION_ACK ) {
-                            printf("debug[%s:%d]:   ACK, x_ack=%u\n", __FILE__, __LINE__, ph->x_ack);
+                            //printf("debug[%s:%d]:   ACK, x_ack=%u\n", __FILE__, __LINE__, ph->x_ack);
+			    ;
 			}
 
 			if ( PACKET_HEAD_SZ == ph->sz ) {
-                            p->tun_list.tuns[i].r_stat = TUN_R_FULL;
+                            t->r_stat = TUN_R_FULL;
     	                }
 			else {
                             printf("debug[%s:%d]:   PSH, x_seq=%u\n", __FILE__, __LINE__, ph->x_seq);
-        	            p->tun_list.tuns[i].r_stat = TUN_R_DATA;
+        	            t->r_stat = TUN_R_DATA;
 			}
 		    }
         	}
@@ -418,13 +419,11 @@ static int _tunToBuff( int i, Pipe * p ) {
             case TUN_R_DATA:
     	        /* 正在读packet的数据
 		 *
-		 *
-		 *
 		 */
                 printf("debug[%s:%d]: TUN_R_DATA\n",  __FILE__, __LINE__);
-    	        ph = ( PacketHead *)( p->tun_list.tuns[i].r_seg.buff );
-                want_sz = ph->sz - p->tun_list.tuns[i].r_seg.sz;
-        	rt = putBytesFromFd( &(p->tun_list.tuns[i].r_seg), p->tun_list.tuns[i].fd, &want_sz );
+    	        ph = ( PacketHead *)( t->r_seg.buff );
+                want_sz = ph->sz - t->r_seg.sz;
+        	rt = putBytesFromFd( &(t->r_seg), t->fd, &want_sz );
         	switch ( rt ) {
         	    case -1: // socket closed
                     case -2: // socket error
@@ -436,11 +435,11 @@ static int _tunToBuff( int i, Pipe * p ) {
                         dprintf(2, "Error[%s:%d]: programing error rt=%d\n",  __FILE__, __LINE__, rt);
         	    	return -4;
         	}
-        	if ( ph->sz == p->tun_list.tuns[i].r_seg.sz ) {
+        	if ( ph->sz == t->r_seg.sz ) {
                     printf("debug[%s:%d]: 读取完Packet，数据如下：\n",  __FILE__, __LINE__);
-                    dumpPacket( (Packet *)(p->tun_list.tuns[i].r_seg.buff) );
-                    dumpBuff( &(p->tun_list.tuns[i].r_seg) );
-        	    p->tun_list.tuns[i].r_stat = TUN_R_FULL;
+                    dumpPacket( (Packet *)(t->r_seg.buff) );
+                    dumpBuff( &(t->r_seg) );
+        	    t->r_stat = TUN_R_FULL;
         	}
                 break;
 
@@ -449,7 +448,7 @@ static int _tunToBuff( int i, Pipe * p ) {
     	        // 转移之前要抛弃缓冲区前面的PachetHead。
                 printf("debug[%s:%d]: TUN_R_FULL\n",  __FILE__, __LINE__);
     	    
-    	        ph = ( PacketHead *)( p->tun_list.tuns[i].r_seg.buff);
+    	        ph = ( PacketHead *)( t->r_seg.buff);
     	        if ( ph->flags & ACTION_ACK ) {
 		    // case 1: ph->x_ack <  p->last_send_ack + 1
 		    //   这个忽略就成，需要receiver的ack目的是：确认自己需不需要重发。
@@ -493,14 +492,14 @@ static int _tunToBuff( int i, Pipe * p ) {
 		    }
 		    
                     if ( ph->sz == PACKET_HEAD_SZ ) {
-    	                 p->tun_list.tuns[i].r_stat = TUN_R_INIT;
+    	                 t->r_stat = TUN_R_INIT;
 		         break;
 		    }
     	        }
 		if ( ph->flags & ACTION_PSH ) {
     	            want_sz = PACKET_HEAD_SZ;
-    	            discardBytes( &(p->tun_list.tuns[i].r_seg), &want_sz );
-		    p->tun_list.tuns[i].r_stat = TUN_R_MOVE;
+    	            discardBytes( &(t->r_seg), &want_sz );
+		    t->r_stat = TUN_R_MOVE;
 		}
     	        break;
 
@@ -508,10 +507,10 @@ static int _tunToBuff( int i, Pipe * p ) {
     	        // packet已读完整，尝试将packet data向tun2fd这个buffer转移。
                 printf("debug[%s:%d]: TUN_R_MOVE\n",  __FILE__, __LINE__);
     	        
-		ph = ( PacketHead *)( p->tun_list.tuns[i].r_seg.buff);
+		ph = ( PacketHead *)( t->r_seg.buff);
                 
 		printf("debug[%s:%d]: 待转移的packet如下：\n",  __FILE__, __LINE__);
-    	        dumpBuff( &(p->tun_list.tuns[i].r_seg) );
+    	        dumpBuff( &(t->r_seg) );
        	        
 		if ( ph->x_seq == p->last_recv_seq + 1 ) {
 	            //==> 收到了想要的packet
@@ -520,10 +519,10 @@ static int _tunToBuff( int i, Pipe * p ) {
 		     * 主要是保证不卡在转移数据上。
 		     */
 		    want_sz = 0;
-    	            rt = putBytesFromBuff( &(p->tun2fd), &(p->tun_list.tuns[i].r_seg), &want_sz );
+    	            rt = putBytesFromBuff( &(p->tun2fd), &(t->r_seg), &want_sz );
     	            switch ( rt ) {
     		        case 0:
-    		            if ( isBuffEmpty( &(p->tun_list.tuns[i].r_seg) ) ) {
+    		            if ( isBuffEmpty( &(t->r_seg) ) ) {
                                 printf("debug[%s:%d]: 转移完成后tun2fd情况：\n",  __FILE__, __LINE__);
     	                        dumpBuff( &(p->tun2fd) );
     		                
@@ -553,8 +552,8 @@ static int _tunToBuff( int i, Pipe * p ) {
     	                // 如果当前的seq大于等于last_recv_seq+1，
 	                // 先把packet存入prev_seglist 队列。
 			if ( seqInLine( &(p->prev_seglist), 
-					(void *)(p->tun_list.tuns[i].r_seg.buff), 
-					p->tun_list.tuns[i].r_seg.sz, 
+					(void *)(t->r_seg.buff), 
+					t->r_seg.sz, 
 					pktCmp ) ) {
     	                    return -3;
 	                }
@@ -574,7 +573,7 @@ static int _tunToBuff( int i, Pipe * p ) {
                     dprintf(2, "Error[%s:%d]: receiver需要回复ack，以免sender继续重发\n",  __FILE__, __LINE__);
     	            return -4;
     	        }
-                p->tun_list.tuns[i].r_stat = TUN_R_INIT;
+                t->r_stat = TUN_R_INIT;
     	        break;
         }
     }
@@ -626,20 +625,18 @@ static int buffToTun( Pipe * p ) {
             switch ( p->tun_list.tuns[i].w_stat ) {
                 case TUN_W_INIT:
 		    printf("debug[%s:%d]: TUN_W_INIT\n", __FILE__, __LINE__);
-	            if ( !( hasDataToTun( p ) || p->stat == P_STAT_ENDING1 ) 
-			    || p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) {
+	            if ( !( hasDataToTun( p ) || p->stat == P_STAT_ENDING1 ) ) {
+		        printf("debug[%s:%d]: 无数据待发\n", __FILE__, __LINE__);
+		        loop = 0;
+			break;
+		    }
+		    if ( p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) {
 		        // 如果没有 active data 和 ack 可发就break
 			// 如果已发送且未收到ack的packet数大于P_PREV_SEND_MAXSZ就break
 			// 如果没有FIN需要发，就break
+		        printf("debug[%s:%d]: 到达发送上限\n", __FILE__, __LINE__);
 			loop = 0;
 			break;
-		    }
-		    if ( hasDataToTun( p ) ) {
-		        printf("debug[%s:%d]: hasDataToTun\n", __FILE__, __LINE__);
-			dumpBuff( &(p->fd2tun) );
-		        printf("debug[%s:%d]: p->unsend_count=%d\n", 
-					__FILE__, __LINE__, 
-					p->unsend_count);
 		    }
 
                     //==== 组装packet ====
@@ -774,7 +771,7 @@ int stream( int mode, Pipe * p, int fd ) {
     switch ( mode ) {
         case P_STREAM_FD2BUFF:
 	    // 这个模式下，就是把fd的数据读到buff里去
-	    printf("debug[%s:%d]: mode=P_STREAM_FD2BUFF\n", __FILE__, __LINE__); 
+	    printf("Info[%s:%d]: <-> FD2BUFF\n", __FILE__, __LINE__); 
             
 	    if ( p->fd_flags & FD_CLOSED ) {
 	        return 2;
@@ -782,21 +779,21 @@ int stream( int mode, Pipe * p, int fd ) {
 
             want_sz = 0;
             rt = putBytesFromFd( &(p->fd2tun), p->fd, &want_sz );
-            printf("debug[%s:%d]: putBytesFromFd read_sz=%lu rt=%d\n", __FILE__, __LINE__, want_sz, rt); 
+            printf("debug[%s:%d]: read_sz=%lu\n", __FILE__, __LINE__, want_sz); 
             switch ( rt ) {
                 case 0:  // socket block, buffer is not full
-                    printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
+                    //printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
 	            return 0;
                 case 1:  // buffer is full, socket non-block
                 case -3: // buffer is full, socket non-block
-                    printf("debug[%s:%d]: buffer is full\n", __FILE__, __LINE__); 
+                    printf("warning[%s:%d]: buffer is full\n", __FILE__, __LINE__); 
                     return 1;
                 case -1: // socket error
                     printf("Error[%s:%d]: socket error\n", __FILE__, __LINE__); 
                     return -1;
                 case -2: // socket closed
 		    p->fd_flags |= FD_CLOSED;
-                    printf("debug[%s:%d]: socket closed\n", __FILE__, __LINE__); 
+                    //printf("debug[%s:%d]: socket closed\n", __FILE__, __LINE__); 
                     return 2;
 		default:
                     printf("Error[%s:%d]: 不可能发生，心理安慰\n", __FILE__, __LINE__); 
@@ -806,7 +803,7 @@ int stream( int mode, Pipe * p, int fd ) {
 
         case P_STREAM_BUFF2FD:
 	    // 这个模式下，就是把buffer: tun2fd 的数据尽量发送出去
-	    printf("debug[%s:%d]: mode=P_STREAM_BUFF2FD\n", __FILE__, __LINE__); 
+	    printf("Info[%s:%d]: <-> BUFF2FD\n", __FILE__, __LINE__); 
 
 	    if ( p->fd_flags & FD_CLOSED ) {
 	        return 2;
@@ -814,12 +811,12 @@ int stream( int mode, Pipe * p, int fd ) {
 	    
 	    before_sz = p->tun2fd.sz;
             rt = getBytesToFd( &(p->tun2fd), p->fd );
-            printf("debug[%s:%d]: getBytesToFd write_sz=%lu\n", 
+            printf("debug[%s:%d]: write_sz=%lu\n", 
 			    __FILE__, __LINE__, 
 			    before_sz - p->tun2fd.sz); 
             switch ( rt ) {
                 case 0:  // socket block
-                    printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
+                    //printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
                     if ( before_sz > p->tun2fd.sz ) {
 	    	        return 21;
 	     	    }
@@ -828,7 +825,7 @@ int stream( int mode, Pipe * p, int fd ) {
 	    	    }
 		    break;
                 case 1:  // send successfully, buffer is now empty
-                    printf("debug[%s:%d]: send all\n", __FILE__, __LINE__); 
+                    //printf("debug[%s:%d]: send all\n", __FILE__, __LINE__); 
     	            return 22;
                 case -1: //socket error
                     printf("Error[%s:%d]: socket error\n", __FILE__, __LINE__); 
@@ -843,28 +840,29 @@ int stream( int mode, Pipe * p, int fd ) {
             break;
 	
 	case P_STREAM_TUN2BUFF:
-	    printf("debug[%s:%d]: mode=P_STREAM_TUN2BUFF\n", __FILE__, __LINE__); 
+	    printf("Info[%s:%d]: <-> TUN2BUFF\n", __FILE__, __LINE__); 
 	    
 	    if ( p->tun_closed == 'y' ) {
 	        return 32;
 	    }
 
-	    // if fd != p->fd, then tun_fd has read event
+	    before_sz = p->tun2fd.sz;
             rt = tunToBuff( fd, p );
-	    printf("debug[%s:%d]: tunToBuff rt=%d\n", __FILE__, __LINE__, rt); 
+	    printf("debug[%s:%d]: write_sz=%lu\n", __FILE__, __LINE__, 
+			    before_sz - p->tun2fd.sz); 
             switch ( rt ) {
 		case 2: // end service
                     printf("Info[%s:%d]: end service\n", __FILE__, __LINE__); 
 		    return 32;
                 case 1: // buffer's remaining space maybe not enough
-                    printf("debug[%s:%d]: buffer's remaining space maybe not enough\n", __FILE__, __LINE__); 
+                    //printf("debug[%s:%d]: buffer's remaining space maybe not enough\n", __FILE__, __LINE__); 
 	            return 31;
-                case 0: // socket block
-                    printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
+                case 0: // 
+                    //printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
                     return 30;
                 case -1:// errors
                     printf("Error[%s:%d]: errors %d %s\n", __FILE__, __LINE__, errno, strerror(errno) ); 
-	            return rt;
+	            return -1;
 		default:
                     printf("Error[%s:%d]: 不可能发生，心理安慰\n", __FILE__, __LINE__); 
 		    return -66;
@@ -872,6 +870,7 @@ int stream( int mode, Pipe * p, int fd ) {
             break;
 
 	case P_STREAM_BUFF2TUN:
+	    printf("Info[%s:%d]: <-> BUFF2TUN\n", __FILE__, __LINE__); 
 	    
 	    if ( p->tun_closed == 'y' ) {
 	        return 40;
@@ -883,10 +882,11 @@ int stream( int mode, Pipe * p, int fd ) {
 	     *
 	     *
 	     */
-	    printf("debug[%s:%d]: mode=P_STREAM_BUFF2TUN\n", __FILE__, __LINE__); 
 	    
+	    before_sz = p->fd2tun.sz;
             rt = buffToTun( p );
-            printf("debug[%s:%d]: buffToTun rt=%d\n", __FILE__, __LINE__, rt); 
+            printf("debug[%s:%d]: write_sz=%lu\n", 
+			    __FILE__, __LINE__, before_sz - p->fd2tun.sz); 
             switch ( rt ) {
 		case 1: // 还有发送能力
 		    return 41;
