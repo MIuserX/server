@@ -31,8 +31,8 @@ struct {
 } serv_conf = {
     10082,
     "127.0.0.1",
-    10087
-    //5432
+    //10087
+    5432
 };
 
 /*
@@ -509,7 +509,7 @@ int _destroy_pipe( Pipe * p, ForEpoll * ep ) {
     return 0;
 }
 
-void main_loop_v2( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
+/*void main_loop_v2( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
     int                i;
     int                rt;
     int                fd;
@@ -602,45 +602,65 @@ void main_loop_v2( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr )
             if ( fd_node->type == FD_MERGE ) {
 		if ( ep.evs[i].events & EPOLLIN ) {
 	            printf("debug[%s:%d]: merge fd IN\n", __FILE__, __LINE__);
-		    rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
-	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                // destroy fd_nodes
-	                // destroy epoll
-	                // destroy pipe 
-	                break;
-	            }
+		    if ( fd_node->p ) {
+		        rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
+	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                    // destroy fd_nodes
+	                    // destroy epoll
+	                    // destroy pipe 
+	                    break;
+	                }
+		    }
+		    else {
+	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
+		    }
 		}
 		if ( ep.evs[i].events & EPOLLOUT ) {
 	            printf("debug[%s:%d]: merge fd OUT\n", __FILE__, __LINE__);
-		    rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
-	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                // destroy fd_nodes
-	                // destroy epoll
-	                // destroy pipe 
-	                break;
-	            }
+		    if ( fd_node->p ) {
+		        rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
+	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                    // destroy fd_nodes
+	                    // destroy epoll
+	                    // destroy pipe 
+	                    break;
+	                }
+		    }
+		    else {
+	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
+		    }
 		}
 	    }
 	    else if ( fd_node->type == FD_TUN ) {
 		if ( ep.evs[i].events & EPOLLIN ) {
 	            printf("debug[%s:%d]: tunnel fd IN\n", __FILE__, __LINE__);
-		    rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
-	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                // destroy fd_nodes
-	                // destroy epoll
-	                // destroy pipe 
-	                break;
-	            }
+		    if ( fd_node->p ) {
+		        rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
+	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                    // destroy fd_nodes
+	                    // destroy epoll
+	                    // destroy pipe 
+	                    break;
+	                }
+		    }
+		    else {
+	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
+		    }
 		}
 		if ( ep.evs[i].events & EPOLLOUT ) {
 	            printf("debug[%s:%d]: tunnel fd OUT\n", __FILE__, __LINE__);
-		    rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
-	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                // destroy fd_nodes
-	                // destroy epoll
-	                // destroy pipe 
-	                break;
-	            }
+		    if ( fd_node->p ) {
+		        rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
+	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                    // destroy fd_nodes
+	                    // destroy epoll
+	                    // destroy pipe 
+	                    break;
+	                }
+		    }
+		    else {
+	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
+		    }
 		}
 	    }
         }
@@ -652,7 +672,7 @@ void main_loop_v2( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr )
 	    }
 	}
     }
-}
+}*/
 
 void main_loop( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
     int                i;
@@ -743,49 +763,68 @@ void main_loop( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
 		continue;
 	    }
 
-            // transffer data from one edge to the other eage of pipe
             if ( fd_node->type == FD_MERGE ) {
 		if ( ep.evs[i].events & EPOLLIN ) {
 	            printf("debug[%s:%d]: merge fd IN\n", __FILE__, __LINE__);
-		    rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
-	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                // destroy fd_nodes
-	                // destroy epoll
-	                // destroy pipe 
-	                break;
-	            }
+		    if ( fd_node->p ) {
+		        rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
+	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                    // destroy fd_nodes
+	                    // destroy epoll
+	                    // destroy pipe 
+	                    break;
+	                }
+		    }
+		    else {
+	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
+		    }
 		}
 		if ( ep.evs[i].events & EPOLLOUT ) {
 	            printf("debug[%s:%d]: merge fd OUT\n", __FILE__, __LINE__);
-		    rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
-	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                // destroy fd_nodes
-	                // destroy epoll
-	                // destroy pipe 
-	                break;
-	            }
+		    if ( fd_node->p ) {
+		        rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
+	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                    // destroy fd_nodes
+	                    // destroy epoll
+	                    // destroy pipe 
+	                    break;
+	                }
+		    }
+		    else {
+	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
+		    }
 		}
 	    }
 	    else if ( fd_node->type == FD_TUN ) {
 		if ( ep.evs[i].events & EPOLLIN ) {
 	            printf("debug[%s:%d]: tunnel fd IN\n", __FILE__, __LINE__);
-		    rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
-	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                // destroy fd_nodes
-	                // destroy epoll
-	                // destroy pipe 
-	                break;
-	            }
+		    if ( fd_node->p ) {
+		        rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
+	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                    // destroy fd_nodes
+	                    // destroy epoll
+	                    // destroy pipe 
+	                    break;
+	                }
+		    }
+		    else {
+	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
+		    }
 		}
 		if ( ep.evs[i].events & EPOLLOUT ) {
 	            printf("debug[%s:%d]: tunnel fd OUT\n", __FILE__, __LINE__);
-		    rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
-	            if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                // destroy fd_nodes
-	                // destroy epoll
-	                // destroy pipe 
-	                break;
-	            }
+		    if ( fd_node->p ) {
+		        rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
+	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
+	                    // destroy fd_nodes
+	                    // destroy epoll
+	                    // destroy pipe 
+	                    break;
+	                }
+		    }
+		    else {
+	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
+		    }
 		}
 	    }
         }
