@@ -632,127 +632,129 @@ static int buffToTun( Pipe * p ) {
 
     // 把每个tunnel fd的发送状态都推进一遍
     for ( i = 0; i < p->tun_list.len; i++ ) {
-	printf("debug[%s:%d]: buffToTun i=%d fd=%d\n", 
-			__FILE__, __LINE__, 
-			i, p->tun_list.tuns[i].fd);
-	loop = 1;
-	while ( loop ) {
-            switch ( p->tun_list.tuns[i].w_stat ) {
-                case TUN_W_INIT:
-		    printf("debug[%s:%d]: TUN_W_INIT\n", __FILE__, __LINE__);
-	            if ( !( hasDataToTun( p ) || p->stat == P_STAT_ENDING1 ) ) {
-		        printf("debug[%s:%d]: 无数据待发\n", __FILE__, __LINE__);
-		        loop = 0;
-			break;
-		    }
-		    if ( p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) {
-		        // 如果没有 active data 和 ack 可发就break
-			// 如果已发送且未收到ack的packet数大于P_PREV_SEND_MAXSZ就break
-			// 如果没有FIN需要发，就break
-		        printf("debug[%s:%d]: 到达发送上限\n", __FILE__, __LINE__);
-			loop = 0;
-			break;
-		    }
+        if ( p->tun_list.tuns[i].status == TUN_AUTHED ) {
+	    printf("debug[%s:%d]: buffToTun i=%d fd=%d\n", 
+	    		__FILE__, __LINE__, 
+	    		i, p->tun_list.tuns[i].fd);
+	    loop = 1;
+	    while ( loop ) {
+                switch ( p->tun_list.tuns[i].w_stat ) {
+                    case TUN_W_INIT:
+	    	        printf("debug[%s:%d]: TUN_W_INIT\n", __FILE__, __LINE__);
+	                    if ( !( hasDataToTun( p ) || p->stat == P_STAT_ENDING1 ) ) {
+	    	            printf("debug[%s:%d]: 无数据待发\n", __FILE__, __LINE__);
+	    	            loop = 0;
+	    	            break;
+	    	        }
+	    	        if ( p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) {
+	    	            // 如果没有 active data 和 ack 可发就break
+	    	            // 如果已发送且未收到ack的packet数大于P_PREV_SEND_MAXSZ就break
+	    	            // 如果没有FIN需要发，就break
+	    	            printf("debug[%s:%d]: 到达发送上限\n", __FILE__, __LINE__);
+	    	            loop = 0;
+	    	            break;
+	    	        }
 
-                    //==== 组装packet ====
-            	    packet_ = (Packet *)(p->tun_list.tuns[i].w_seg.buff);
-                    packet_->head.flags = 0;
-                    packet_->head.sz = PACKET_HEAD_SZ;
-	            //== 组装ACTION_ACK和x_ack
-		    if ( hasUnSendAck( p ) ) {
-                        // 获取一个ack seq
-			getNode( &(p->ack_sending_list), (void **)(&usap), matchUnAck, NULL );
-			p->unsend_count--;
-			usap->sending = 'y';
-                        // 组装packet
-			packet_->head.flags |= ACTION_ACK;
-                        packet_->head.x_ack = usap->seq;
-		        
-			printf("debug[%s:%d]: packet - make ack: x_ack=%u\n", __FILE__, __LINE__, packet_->head.x_ack); 
-		    }
-		    //== 组装ACTION_PSH和x_seq
-		    if ( hasActiveData( &(p->fd2tun) ) ) { 
-                        packet_->head.flags |= ACTION_PSH;
+                        //==== 组装packet ====
+                	packet_ = (Packet *)(p->tun_list.tuns[i].w_seg.buff);
+                        packet_->head.flags = 0;
+                        packet_->head.sz = PACKET_HEAD_SZ;
+	                //== 组装ACTION_ACK和x_ack
+	    	    if ( hasUnSendAck( p ) ) {
+                            // 获取一个ack seq
+	    		getNode( &(p->ack_sending_list), (void **)(&usap), matchUnAck, NULL );
+	    		p->unsend_count--;
+	    		usap->sending = 'y';
+                            // 组装packet
+	    		packet_->head.flags |= ACTION_ACK;
+                            packet_->head.x_ack = usap->seq;
+	    	        
+	    		printf("debug[%s:%d]: packet - make ack: x_ack=%u\n", __FILE__, __LINE__, packet_->head.x_ack); 
+	    	    }
+	    	    //== 组装ACTION_PSH和x_seq
+	    	    if ( hasActiveData( &(p->fd2tun) ) ) { 
+                            packet_->head.flags |= ACTION_PSH;
 
-			if ( p->last_send_seq == 0 ) {
-		            p->last_send_seq = random() % 66 + 1;
-			    p->last_send_ack = p->last_send_seq;
-			    packet_->head.flags |= ACTION_SYN;
-			}
-                        packet_->head.x_seq = ( ++(p->last_send_seq) );
+	    		if ( p->last_send_seq == 0 ) {
+	    	            p->last_send_seq = random() % 66 + 1;
+	    		    p->last_send_ack = p->last_send_seq;
+	    		    packet_->head.flags |= ACTION_SYN;
+	    		}
+                            packet_->head.x_seq = ( ++(p->last_send_seq) );
     
-                        seg_sz = PACKET_DATA_SZ;
-                        rt = preGetBytes( &(p->fd2tun), packet_->data, &seg_sz, packet_->head.x_seq ); 
-                        if ( -3 == rt ) {
-		            return -1;
+                            seg_sz = PACKET_DATA_SZ;
+                            rt = preGetBytes( &(p->fd2tun), packet_->data, &seg_sz, packet_->head.x_seq ); 
+                            if ( -3 == rt ) {
+	    	            return -1;
+                            }
+                            packet_->head.sz += seg_sz;
+	    	        printf("debug[%s:%d]: packet - make data: x_seq=%u\n", __FILE__, __LINE__, packet_->head.x_seq); 
+	    	    }
+
+	    	    //== 发送FIN
+	    	    if ( !( packet_->head.flags & ACTION_PSH )
+	    		    && !( packet_->head.flags & ACTION_ACK )
+	    	            && p->stat == P_STAT_ENDING1 ) {
+	    	        packet_->head.flags |= ACTION_FIN;
+	    		p->stat == P_STAT_ENDING2;
+	    	    }
+    
+                        //seg.head.checksum = ;
+                        setBuffSize( &(p->tun_list.tuns[i].w_seg), packet_->head.sz );
+	    	    
+	    	    printf("debug[%s:%d]: 组装好的待发送packet:\n", __FILE__, __LINE__); 
+                        dumpPacket( packet_ );
+                        
+	    	    p->tun_list.tuns[i].w_stat = TUN_W_SEND;
+                	    break;
+    
+                    case TUN_W_SEND:
+                        //==== 发送packet
+	    	    printf("debug[%s:%d]: TUN_W_SEND\n", __FILE__, __LINE__); 
+                	    packet_ = (Packet *)(p->tun_list.tuns[i].w_seg.buff);
+                        rt = getBytesToFd( &(p->tun_list.tuns[i].w_seg), p->tun_list.tuns[i].fd );
+	    	    printf("debug[%s:%d]: getBytesToFd: rt=%d\n", __FILE__, __LINE__, rt); 
+    	    	    if ( rt == -1 ) { // socket error
+	    	        printf("Error[%s:%d]: socket error %s\n", __FILE__, __LINE__, strerror(errno)); 
+    	    	        return -1;
+    	    	    }
+
+	    	    if ( rt == 0 ) {
+	    		// socket block
+	    		p->tun_list.tuns[i].flags |= FD_WRITE_BLOCK;
+	    		loop = 0;
+	    	    }
+	    	    else {
+	    		p->tun_list.tuns[i].flags &= ( ~FD_WRITE_BLOCK );
+	    	    }
+
+                        if ( isBuffEmpty( &(p->tun_list.tuns[i].w_seg) ) ) {
+                            if ( packet_->head.flags & ACTION_ACK ) {
+	    		    usa.seq = packet_->head.x_ack;
+	    		    if ( p->last_recv_ack + 1 == usa.seq ) {
+	    		        p->last_recv_ack = usa.seq;
+	    		        removeFromLine( &(p->ack_sending_list), &usa, matchSeq );
+	    		    }
+	    		}
+
+                            if ( packet_->head.flags & ACTION_FIN ) {
+	    		    p->stat = P_STAT_END;
+	    		}
+
+    	    	        cleanBuff( &(p->tun_list.tuns[i].w_seg) );
+                    	p->tun_list.tuns[i].w_stat = TUN_W_INIT;
                         }
-                        packet_->head.sz += seg_sz;
-		        printf("debug[%s:%d]: packet - make data: x_seq=%u\n", __FILE__, __LINE__, packet_->head.x_seq); 
-		    }
-
-		    //== 发送FIN
-		    if ( !( packet_->head.flags & ACTION_PSH )
-			    && !( packet_->head.flags & ACTION_ACK )
-		            && p->stat == P_STAT_ENDING1 ) {
-		        packet_->head.flags |= ACTION_FIN;
-			p->stat == P_STAT_ENDING2;
-		    }
-    
-                    //seg.head.checksum = ;
-                    setBuffSize( &(p->tun_list.tuns[i].w_seg), packet_->head.sz );
-		    
-		    printf("debug[%s:%d]: 组装好的待发送packet:\n", __FILE__, __LINE__); 
-                    dumpPacket( packet_ );
-                    
-		    p->tun_list.tuns[i].w_stat = TUN_W_SEND;
-            	    break;
-    
-                case TUN_W_SEND:
-                    //==== 发送packet
-		    printf("debug[%s:%d]: TUN_W_SEND\n", __FILE__, __LINE__); 
-            	    packet_ = (Packet *)(p->tun_list.tuns[i].w_seg.buff);
-                    rt = getBytesToFd( &(p->tun_list.tuns[i].w_seg), p->tun_list.tuns[i].fd );
-		    printf("debug[%s:%d]: getBytesToFd: rt=%d\n", __FILE__, __LINE__, rt); 
-    		    if ( rt == -1 ) { // socket error
-		        printf("Error[%s:%d]: socket error %s\n", __FILE__, __LINE__, strerror(errno)); 
-    		        return -1;
-    		    }
-
-		    if ( rt == 0 ) {
-			// socket block
-			p->tun_list.tuns[i].flags |= FD_WRITE_BLOCK;
-			loop = 0;
-		    }
-		    else {
-			p->tun_list.tuns[i].flags &= ( ~FD_WRITE_BLOCK );
-		    }
-
-                    if ( isBuffEmpty( &(p->tun_list.tuns[i].w_seg) ) ) {
-                        if ( packet_->head.flags & ACTION_ACK ) {
-			    usa.seq = packet_->head.x_ack;
-			    if ( p->last_recv_ack + 1 == usa.seq ) {
-			        p->last_recv_ack = usa.seq;
-			        removeFromLine( &(p->ack_sending_list), &usa, matchSeq );
-			    }
-			}
-
-                        if ( packet_->head.flags & ACTION_FIN ) {
-			    p->stat = P_STAT_END;
-			}
-
-    		        cleanBuff( &(p->tun_list.tuns[i].w_seg) );
-                	p->tun_list.tuns[i].w_stat = TUN_W_INIT;
-                    }
-                    break;
+                        break;
+                }
             }
-        }
 
-	if ( p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) {
-	    p->tun_list.sending_count++;
+	    if ( p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) {
+	        p->tun_list.sending_count++;
+	    }
 	}
     }
 
-    if ( p->tun_list.sending_count == p->tun_list.len || p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) { 
+    if ( p->tun_list.sending_count == p->tun_list.sz || p->fd2tun.buff2segs.len >= P_PREV_SEND_MAXSZ ) { 
         return 1;
     }
 
@@ -804,11 +806,11 @@ int stream( int mode, Pipe * p, int fd ) {
                     printf("warning[%s:%d]: buffer is full\n", __FILE__, __LINE__); 
                     return 1;
                 case -1: // socket error
-                    printf("Error[%s:%d]: socket error\n", __FILE__, __LINE__); 
+                    printf("Error[%s:%d]: merge socket error\n", __FILE__, __LINE__); 
                     return -1;
                 case -2: // socket closed
 		    p->fd_flags |= FD_CLOSED;
-                    //printf("debug[%s:%d]: socket closed\n", __FILE__, __LINE__); 
+                    printf("debug[%s:%d]: merge socket closed\n", __FILE__, __LINE__); 
                     return 2;
 		default:
                     printf("Error[%s:%d]: 不可能发生，心理安慰\n", __FILE__, __LINE__); 
