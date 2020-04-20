@@ -23,8 +23,8 @@
 #define P_BUFF_SZ (40960)
 
 // 
-#define P_PREV_SEND_MAXSZ (3)
-#define P_PREV_RECV_MAXSZ (2)
+#define P_PREV_SEND_MAXSZ (8)
+#define P_PREV_RECV_MAXSZ (7)
 
 #define FD_HAS_UNWRITE  (0x00000001) // (废弃)
 #define FD_HAS_UNREAD   (0x00000002) // (废弃)
