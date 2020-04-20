@@ -21,9 +21,13 @@
  * -1: allocate memory failed
  */
 int initPipe( Pipe * p, size_t sz, int ntun ) {
+    int idx;
+
     assert( p != NULL );
     assert( sz > 0 );
-   
+
+    idx = p->idx;
+
     bzero( (void *)p, sizeof(Pipe) );
     
     if ( initTunList( &(p->tun_list), ntun ) ) {
@@ -51,6 +55,7 @@ int initPipe( Pipe * p, size_t sz, int ntun ) {
     p->fd = -1;
     p->tun_closed = 'n';
     p->unsend_count = 0;
+    p->idx = idx;
 
     return 0;
 }
@@ -61,8 +66,12 @@ void cleanPipe( Pipe * p ) {
 }
 
 void destroyPipe( Pipe * p ) {
+    int idx;
+
     assert( p != NULL );
     
+    idx = p->idx;
+
     if ( p->fd != -1 ) {
         close( p->fd );
     }
@@ -72,6 +81,7 @@ void destroyPipe( Pipe * p ) {
     destroyBuff( &(p->tun2fd) );
     
     bzero( (void *)p, sizeof(Pipe) );
+    p->idx = idx;
 }
 
 int hasUnSendAck( Pipe * p ) {
@@ -912,8 +922,12 @@ int stream( int mode, Pipe * p, int fd ) {
 
 
 void initPipeList( PipeList * pl ) {
+    int i;
     assert( pl != NULL );
     bzero( (void *)pl, sizeof(PipeList) );
+    for ( i = 0; i < P_LIST_SZ; i++ ) {
+        pl->pipes[i].idx = i;
+    }
 }
 
 void destroyPipeList( PipeList * pl ) {

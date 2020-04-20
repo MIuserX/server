@@ -47,6 +47,7 @@ typedef struct un_send_ack {
 //
 typedef struct pipe {
     int          use;
+    int          idx;
 
     pthread_t    pid;
 
