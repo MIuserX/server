@@ -13,7 +13,7 @@
 #include "pipe.h"
 
 // server fd list max length
-#define MAX_FDS (128)
+#define MAX_FDS (1024)
 
 #define FD_UNKNOWN ('0')
 #define FD_MERGE   ('1')
@@ -52,6 +52,7 @@ void destroyFdList( FdList * fl );
 int isFdListEmpty( FdList * fl );
 int isFdListFull( FdList * fl );
 
+int getAEmptyFn( FdList * );
 int addFd( FdList * , FdNode * );
 int delFd( FdList * , int fd );
 

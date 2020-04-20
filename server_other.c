@@ -30,6 +30,33 @@ void destroyFdList( FdList * fl ) {
     }
 }
 
+/*
+ *
+ * == return ==
+ * 
+ *
+ */
+int getAEmptyFn( FdList * fl ) {
+    int i = 0;
+
+    assert( fl != NULL );
+
+    if ( fl->sz >= MAX_FDS ) {
+	return -1;
+    }
+
+    while ( i < MAX_FDS && fl->fds[i].use != 0 ) {
+        ++i;
+    }
+    if ( i < MAX_FDS ) {
+	fl->nodes[i].use = 1;
+	fl->sz++;
+        return i;
+    }
+
+    return -1;
+}
+
 /* 
  * #### Param
  *
