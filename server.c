@@ -167,7 +167,7 @@ static int _set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall) {
     assert( p != NULL );
     assert( ep != NULL );
 
-    for ( i = 0; i < p->tun_list.sz; i++ ) {
+    for ( i = 0; i < p->tun_list.len; i++ ) {
 	// ! is_out && TRUE => set
 	// is_out && FALSE  => unset
 	
@@ -353,7 +353,6 @@ static int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     char wblock = 'n';
     char rblock = 'n';
-    char bblock = 'n';
     int  rt;
 
     assert( p != NULL );
@@ -363,7 +362,7 @@ static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
         //==== 从tunnels读
         rt = stream( P_STREAM_TUN2BUFF, p, evt_fd );
         switch ( rt ) {
-            case -1: // errors
+            case -2: // errors
             case -66:
                 dprintf(2, "Error[%s:%d]: tunnel socket fd %d, errno=%d %s\n", 
                 		__FILE__, __LINE__, 
@@ -387,10 +386,6 @@ static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	    case 30: // socket block
 		rblock = 'y';
                 break;
-
-            case 31: // buffer空间可能不足，不读了
-                bblock = 'y';
-	        break;
         }
 
         //==== 向client fd写
@@ -405,15 +400,8 @@ static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
                     		errno, strerror(errno));
                     return -1;
 
-                case 22: // 消耗了tun2fd的bytes
-		    bblock = 'n';
-		    break;
 
                 case 21: // 消耗了tun2fd的bytes
-                    bblock = 'n';
-		    wblock = 'y';
-		    break;
-
                 case 20: // 未消耗tun2fd的bytes
                     wblock = 'y';
 	    	    break;
@@ -449,7 +437,7 @@ static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	     *   ! isBuffFull( p->fd2tun ) &&
 	     *   bblock == 'n'
 	     */
-	    if ( rblock == 'n' && ( ! isBuffFull( &(p->tun2fd) ) ) && bblock == 'n' ) {
+	    if ( rblock == 'n' && ( ! isBuffFull( &(p->tun2fd) ) ) ) {
 	        continue;
 	    }
 	    break;
