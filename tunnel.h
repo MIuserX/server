@@ -62,6 +62,7 @@ void destroyTunList( TunList * );
 int isTunListEmpty( TunList * );
 int isTunListFull( TunList * );
 
+int exitTunList( TunList *, int );
 int joinTunList( TunList *, int );
 
 int activeTunnels( TunList * , struct sockaddr_in, char ** );

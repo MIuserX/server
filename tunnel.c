@@ -106,6 +106,35 @@ int isTunListFull( TunList * tun_list ) {
 /*
  * == return ==
  *  0: success
+ * -1: tunnel list is empty
+ * -2: not found
+ */
+int exitTunList( TunList * tun_list, int fd ) {
+    int i;
+    
+    assert( tun_list != NULL );
+    assert( fd >= 0 );
+
+    //printf("===> tun_list.sz=%d tun_list.len=%d\n", tun_list->sz, tun_list->len);
+    if ( isTunListEmpty( tun_list ) ) {
+        return -1;
+    }
+
+    for ( i = 0; i < tun_list->len; i++ ) {
+        if ( tun_list->tuns[i].fd == fd ) {
+	    tun_list->tuns[i].fd = -1;
+	    tun_list->tuns[i].status = TUN_INIT;
+	    tun_list->sz -= 1;
+	    return 0
+	}
+    }
+
+    return -2;
+}
+
+/*
+ * == return ==
+ *  0: success
  * -1: tunnel list is full
  */
 int joinTunList( TunList * tun_list, int fd ) {
