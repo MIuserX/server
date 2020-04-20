@@ -78,12 +78,16 @@ int delFd( FdList * fl, int fd ) {
 
     for ( i = 0; i < MAX_FDS; i++ ) {
         if ( fl->fds[i].fd == fd && fl->fds[i].use != 0 ) {
-	    close( fd );
+	    if ( fl->fds[i].fd >= 0 ) {
+	        close( fd );
+	    }
             bzero( (void *)(fl->fds + i), sizeof(FdNode) );
-            fl->sz -= 1;
+            fl->fds[i].fd = -1;
+	    fl->sz -= 1;
 	    return 0;
         }
     }
+
     dprintf(2, "Error: delFd failed, no valid node's fd equals to %d\n", fd);
     return -2;
 }
