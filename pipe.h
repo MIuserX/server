@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
+#include <pthread.h>
 
 #include "common.h"
 #include "buffer.h"
@@ -46,6 +47,8 @@ typedef struct un_send_ack {
 //
 typedef struct pipe {
     int          use;
+
+    pthread_t    pid;
 
     int          stat;
     char         key[P_KEY_SZ]; // pipe 的唯一标识，
