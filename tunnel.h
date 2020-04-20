@@ -62,6 +62,7 @@ void destroyTunList( TunList * );
 int isTunListEmpty( TunList * );
 int isTunListFull( TunList * );
 
+// server 端使用下面俩函数
 int exitTunList( TunList *, int );
 int joinTunList( TunList *, int );
 
