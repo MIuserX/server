@@ -4,11 +4,12 @@
 #include <stdint.h>
 
 #define ACTION_SYN (0x00000001)
-#define ACTION_PSH (0x00000002)
-#define ACTION_ACK (0x00000004)
-#define ACTION_RST (0x00000008)
+#define ACTION_PSH (0x00000002) // 发送数据
+#define ACTION_ACK (0x00000004) // 发送ACK
+#define ACTION_RST (0x00000008) //
 #define ACTION_FIN (0x00000010)
 #define ACTION_RPS (0x00000020)
+#define ACTION_MAK (0x00000040) // 批量ACK
 
 #define PACKET_MAX_SZ  (1024)
 #define PACKET_HEAD_SZ (sizeof(PacketHead))
