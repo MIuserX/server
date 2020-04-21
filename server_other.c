@@ -30,14 +30,14 @@ int notAuthed( FdNode * fn ) {
     return !( fn->flags & FDNODE_AUTHED );
 }
 
-int isMergeFd( FdNode * fn ) {
-    assert( fn != NULL );
-    return !( fn->flags & FDNODE_IS_TUNFD );
-}
-
 int isTunFd( FdNode * fn ) {
     assert( fn != NULL );
     return fn->flags & FDNODE_IS_TUNFD;
+}
+
+int isMergeFd( FdNode * fn ) {
+    assert( fn != NULL );
+    return ! isTunFd( fn );
 }
 
 void cleanFdNode( FdNode * fn ) {
@@ -113,7 +113,7 @@ int getAEmptyFn( FdList * fl ) {
  *  -2: cannot get memory
  * -66: 
  */
-static int _add_fd( FdList * fl, int conn_fd, int is_merge ) {
+static int _add_fd( FdList * fl, int conn_fd, int is_tun ) {
     FdNode * fn;
     int      idx;
 
@@ -126,20 +126,19 @@ static int _add_fd( FdList * fl, int conn_fd, int is_merge ) {
     
     fn = fl->fds + idx;
 
-    if ( ! is_merge ) {
+    if ( is_tun ) {
         if ( initBuff( &(fn->bf), sizeof(AuthPacket), BUFF_MD_2FD ) ) {
             cleanFdNode( fn );
             return -2;
         }
-        fn->flags = FDNODE_BUFF;
+        fn->flags |= FDNODE_BUFF;
     }
 
-    if ( ! is_merge ) { 
+    if ( is_tun ) { 
         fn->flags |= FDNODE_IS_TUNFD;
     }
 
     fn->fd = conn_fd;
-    fn->flags = 0;
     fn->t = time( NULL );
     fn->auth_status = TUN_ACTIVE;
     fn->p = NULL;
@@ -157,7 +156,7 @@ static int _add_fd( FdList * fl, int conn_fd, int is_merge ) {
  */
 int addMergeFd( FdList * fl, int fd ) {
     assert( fl != NULL );
-    return _add_fd( fl, fd, 1 );
+    return _add_fd( fl, fd, 0 );
 }
 
 /* 
@@ -171,7 +170,7 @@ int addMergeFd( FdList * fl, int fd ) {
  */
 int addTunFd( FdList * fl, int fd ) {
     assert( fl != NULL );
-    return _add_fd( fl, fd, 0 );
+    return _add_fd( fl, fd, 1 );
 }
 
 
