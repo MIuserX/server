@@ -23,21 +23,34 @@
 #define P_LIST_SZ (64)
 
 // pipe's buffer size, every pipe has two buffers
-#define P_BUFF_SZ (40960)
+#define P_BUFF_SZ (1024*1024)
 
 // 
-#define P_PREV_SEND_MAXSZ (1024)
-#define P_PREV_RECV_MAXSZ (1023)
+#define P_PREV_SEND_MAXSZ (8)
+
+// 乱序包最多缓存多少个。
+// 例如想要 5 号包，
+// 那么 [6, 13] 号包来了，都会被缓存。
+// 如果大于13的号来了，丢弃。
+#define P_PREV_RECV_MAXSZ (32)
+
+#define P_PREV_NEED_REPUSH (8)
 
 #define FD_HAS_UNWRITE  (0x00000001) // (废弃)
 #define FD_HAS_UNREAD   (0x00000002) // (废弃)
-#define FD_IS_EPOLLLT   (0x00000004) // (废弃)fd 处于EPOLLLT模式
+#define FD_IS_EPOLLIN   (0x00000004) // fd 处于EPOLLIN
 #define FD_IS_EPOLLOUT  (0x00000008) // fd 处于监听EPOLLOUT状态
 #define FD_CLOSED       (0x00000010) // fd closed
 #define FD_READ_BLOCK   (0x00000020) // fd遭遇read block
 #define FD_WRITE_BLOCK  (0x00000040) // fd遭遇write block
+#define FD_NO_WRITING   (0x00000080) // 对方merge fd 已关闭
+#define FD_NO_READING   (0x00000100) // 
 
-#define FDNODE_BUFF     (0x10000000)
+#define FDNODE_BUFF     (0x10000000) // bf 申请了动态内存(关闭时需要释放)
+#define FDNODE_AUTHED   (0x20000000) // fd 已关联pipe
+#define FDNODE_IS_TUNFD (0x40000000) // fd 是个tunnel fd
+#define FDNODE_ACT_NEW  (0x80000000) // fdnode 进行了new pipe 动作
+
 
 #define P_END_WAIT_SEC (1)
 

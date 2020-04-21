@@ -14,6 +14,9 @@
 #define AUTH_TUN_FULL (9)  // s->c: tunnel list is full
 #define AUTH_SERV_ERR (10) // s->c: server internal error
 
+#define AUTH_PL_FULL  (11) // s: pipe list is full
+#define AUTH_FD_FULL  (12) // s: fd list is full
+
 typedef struct auth_packet {
     unsigned int code;
     char         key[P_KEY_SZ];

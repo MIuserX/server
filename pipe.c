@@ -232,14 +232,14 @@ static int _tunToBuff( int , Pipe * );
  *
  * == return ==
  *  2: end service
- *  1: buffer not enough
+ *  1: 向tun2fd转移时卡住
  *  0: socket block
- * -1: errors
+ * -1: socket closed
+ * -2: errors
  */
 static int tunToBuff( int evt_fd, Pipe * p ) {
     int       i;  // loop variable
     int       rt; // ret of function
-    int       ret = 1;
     size_t    want_sz;
     UnSendAck usa;
     Packet *  pkt;
@@ -249,9 +249,14 @@ static int tunToBuff( int evt_fd, Pipe * p ) {
 
     //==== read evt_fd
     for ( i = 0; i < p->tun_list.len; i++ ) {
-        if ( p->tun_list.tuns[i].status == TUN_AUTHED && 
-		p->tun_list.tuns[i].fd == evt_fd ) {
-	    rt = _tunToBuff( i, p );
+        if ( p->tun_list.tuns[i].fd == evt_fd ) {
+            if ( p->tun_list.tuns[i].status != TUN_AUTHED ) {
+                printf("Error[%s:%d]: fd %d in tunnel list, but not TUN_AUTHED\n", 
+				__FILE__, __LINE__, evt_fd );
+		return -2;
+	    }
+	    
+    	    rt = _tunToBuff( i, p );
             
             /* Tunnel 对端发送了FIN，
 	     * 说明：
@@ -264,80 +269,31 @@ static int tunToBuff( int evt_fd, Pipe * p ) {
 	     *
 	     */
 
-	    if ( rt == 2 ) {
-	        for ( i = 0; i < p->tun_list.len; i++ ) {
-		    p->tun_list.tuns[i].status = TUN_CLOSED;
-		}
-	    }
-
-	    if ( rt > -1 ) {
-	        ret = rt;
-		break;
-	    }
-	    else {
-	        return -1;
-	    }
-	    /*
 	    switch ( rt ) {
 		case 2:
-		    ret = 2
-	            break;
-
+	            for ( i = 0; i < p->tun_list.len; i++ ) {
+                        if ( p->tun_list.tuns[i].status == TUN_AUTHED ) {
+		            p->tun_list.tuns[i].flags |= FD_NO_WRITING;
+			}
+		    }
 		case 1:
-		    // buffer空间不足
-		    ret = 1;
-		    break;
-
-		case 0:
-		    // socket block
-		    // 这时已经将读事件耗尽，可以返回。
-		    ret = 0;
-		    break;
+	        case 0:
+		    return rt;
+		case -1: // socket closed
+		    if ( p->stat != P_STAT_ACTIVE ) {
+		        p->tun_list.tuns[i].status = TUN_CLOSED;
+		    }
+		    return -1;
 
 		default:
-		    return -1;
-		    break;
-	    }*/
+		    return -2;
+	    }
 	}
     }
 
-    //==== 尝试转移seq靠后的包
-    if ( p->prev_seglist.len > 0 ) {
-        printf("debug[%s:%d]: 存在提前收到靠后的packet\n",  __FILE__, __LINE__);
-	pkt = (Packet *)getHeadPtr( &(p->prev_seglist) );
-        if ( pkt->head.x_seq == p->last_recv_seq + 1 && 
-		( p->tun2fd.len - p->tun2fd.sz ) >= ( pkt->head.sz - PACKET_HEAD_SZ ) ) {
-            /* 如果 tun2fd 的 buffer 剩余空间够，就转移packet数据，
-             * 如果不够，这次就不转移了。
-             * 主要是保证不卡在转移数据上。
-             */
-            printf("debug[%s:%d]: 提前收到的靠后的packet可以向buffer转移\n",  __FILE__, __LINE__);
-            want_sz = pkt->head.sz - PACKET_HEAD_SZ;
-            rt = putBytes( &(p->tun2fd), pkt->data, &want_sz );
-            if ( rt ==  0 ) {
-                printf("debug[%s:%d]: 转移完成后tun2fd情况：\n",  __FILE__, __LINE__);
-                dumpBuff( &(p->tun2fd) );
-                        
-                usa.sending = 'n';
-                usa.seq = pkt->head.x_seq;
-                if ( seqInLine( &(p->ack_sending_list), (void *)&usa, sizeof(usa), cmp ) ) {
-                    return -1;
-                }
-                p->unsend_count++;
-                
-    	        removeFromLine( &(p->prev_seglist), pkt, matchPacketSeq );
-    
-                p->last_recv_seq = pkt->head.x_seq;
-            }
-            else {
-                dprintf(2, "Error[%s:%d]: programing error rt=%d\n",  __FILE__, __LINE__, rt);
-                return -1;
-            }
-        }
-        printf("debug[%s:%d]: 提前收到的靠后的packet无法向buffer转移\n",  __FILE__, __LINE__);
-    }
-
-    return ret;
+    printf("Error[%s:%d]: fd %d not in tunnel list\n", 
+    		__FILE__, __LINE__, evt_fd );
+    return -2;
 }
 
 /* 从 tunnels 向 pipe 里读数据
@@ -346,7 +302,7 @@ static int tunToBuff( int evt_fd, Pipe * p ) {
  *
  * == return ==
  *  2: end service
- *  1: buffer remaining space maybe not enough
+ *  1: 读取buffer卡住，无法继续
  *  0: socket block
  * -1: socket closed
  * -2: socket error
@@ -359,6 +315,7 @@ static int _tunToBuff( int i, Pipe * p ) {
     unsigned int * pu;
     PacketHead *   ph;
     PacketHead *   phead;
+    Packet     *   pkt;
     UnSendAck      usa;
     Tunnel       * t = p->tun_list.tuns + i;
     
@@ -374,9 +331,9 @@ static int _tunToBuff( int i, Pipe * p ) {
 		    return 2;
 		}
 
-                if ( ( p->tun2fd.len - p->tun2fd.sz ) < ( PACKET_MAX_SZ - PACKET_HEAD_SZ ) ) {
-                    return 1;
-                }
+                //if ( ( p->tun2fd.len - p->tun2fd.sz ) < ( PACKET_MAX_SZ - PACKET_HEAD_SZ ) ) {
+                //    return 1;
+                //}
 
     	        cleanBuff( &(t->r_seg) );
                     
@@ -528,38 +485,17 @@ static int _tunToBuff( int i, Pipe * p ) {
     	        //dumpBuff( &(t->r_seg) );
        	        
 		if ( ph->x_seq == p->last_recv_seq + 1 ) {
-	            //==> 收到了想要的packet
-    	            /* 如果 tun2fd 的 buffer 剩余空间够，就转移packet数据，
-		     * 如果不够，这次就不转移了。
-		     * 主要是保证不卡在转移数据上。
-		     */
-		    want_sz = 0;
-    	            rt = putBytesFromBuff( &(p->tun2fd), &(t->r_seg), &want_sz );
-    	            switch ( rt ) {
-    		        case 0:
-    		            if ( isBuffEmpty( &(t->r_seg) ) ) {
-                                //printf("debug[%s:%d]: 转移完成后tun2fd情况：\n",  __FILE__, __LINE__);
-    	                        //dumpBuff( &(p->tun2fd) );
-    		                
-		        	usa.sending = 'n';
-		        	usa.seq = ph->x_seq;
-		                if ( seqInLine( &(p->ack_sending_list), (void *)&usa, sizeof(usa), cmp ) ) {
-		        	    return -3;
-		        	}
-		        	p->unsend_count++;
-		        
-                                //printf("debug[%s:%d]: p->unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count);
-		        	p->last_recv_seq = ph->x_seq;
-    		            } 
-		    	    else {
-                                dprintf(2, "Error[%s:%d]: programing error rt=%d\n",  __FILE__, __LINE__, rt);
-    		                return -4;
-    		            }
-    		            break;
-    		        default: // -1, -2
-                            dprintf(2, "Error[%s:%d]: programing error rt=%d\n",  __FILE__, __LINE__, rt);
-        	            return -4;
-    		    }
+		    usa.sending = 'n';
+		    usa.seq = ph->x_seq;
+		    if ( seqInLine( &(p->ack_sending_list), (void *)&usa, sizeof(usa), cmp ) ) {
+		        return -3;
+		    }
+		    p->unsend_count++;
+		
+                    //printf("debug[%s:%d]: p->unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count);
+		    p->last_recv_seq = ph->x_seq;
+                    
+		    t->r_stat = TUN_R_MOVE1;
     	        }
 		else if ( ph->x_seq > p->last_recv_seq + 1 ) {
 		    //==> 提前收到了更靠后的packet
@@ -572,6 +508,10 @@ static int _tunToBuff( int i, Pipe * p ) {
 					pktCmp ) ) {
     	                    return -3;
 	                }
+
+			if ( p->prev_seglist.len > P_PREV_NEED_REPUSH ) {
+			    p->flags |= P_FLG_REPUSH;
+			}
 	            }
 	            else { 
 		       // ( ph->x_seq > p->last_recv_seq + P_PREV_RECV_MAXSZ )
@@ -590,6 +530,84 @@ static int _tunToBuff( int i, Pipe * p ) {
     	        }
                 t->r_stat = TUN_R_INIT;
     	        break;
+
+    	    case TUN_R_MOVE1:
+    	        // packet已读完整，尝试将packet data向tun2fd这个buffer转移。
+                printf("debug[%s:%d]: TUN_R_MOVE1\n",  __FILE__, __LINE__);
+    	        
+		//printf("debug[%s:%d]: 待转移的packet如下：\n",  __FILE__, __LINE__);
+    	        //dumpBuff( &(t->r_seg) );
+       	        
+	        //==> 收到了想要的packet
+    	        /* 如果 tun2fd 的 buffer 剩余空间够，就转移packet数据，
+		 * 如果不够，这次就不转移了。
+		 * 主要是保证不卡在转移数据上。
+		 */
+		if ( isBuffFull( &(p->tun2fd) ) ) {
+		    return 1;
+		}
+
+		want_sz = p->tun2fd.len - p->tun2fd.sz;
+    	        rt = putBytesFromBuff( &(p->tun2fd), &(t->r_seg), &want_sz );
+    	        switch ( rt ) {
+    		    case 0:
+    		        break;
+
+    		    default: // -1, -2
+                        dprintf(2, "Error[%s:%d]: programing error rt=%d\n",  __FILE__, __LINE__, rt);
+        	        return -4;
+    		}
+
+    		if ( isBuffEmpty( &(t->r_seg) ) ) {
+                    //printf("debug[%s:%d]: 转移完成后tun2fd情况：\n",  __FILE__, __LINE__);
+    	            //dumpBuff( &(p->tun2fd) );
+                    if ( p->prev_seglist.len > 0 ) {
+                        t->r_stat = TUN_R_PREV;
+		    }
+		    else {
+                        t->r_stat = TUN_R_INIT;
+		    }
+    		}
+		else {
+    		    return 1;
+    		}
+		break;
+
+	    case TUN_R_PREV:
+                //==== 尝试转移seq靠后的
+                printf("debug[%s:%d]: 存在提前收到靠后的packet\n",  __FILE__, __LINE__);
+		
+		cleanBuff( &(t->r_seg) );
+                
+		pkt = ( Packet *)getHeadPtr( &(p->prev_seglist) );
+                if ( pkt->head.x_seq == p->last_recv_seq + 1 ) {
+                    /* 如果 tun2fd 的 buffer 剩余空间够，就转移packet数据，
+                     * 如果不够，这次就不转移了。
+                     * 主要是保证不卡在转移数据上。
+                     */
+                    printf("debug[%s:%d]: 提前收到的靠后的packet可以向buffer转移\n",  __FILE__, __LINE__);
+		    
+		    usa.sending = 'n';
+		    usa.seq = pkt->head.x_seq;
+		    if ( seqInLine( &(p->ack_sending_list), (void *)&usa, sizeof(usa), cmp ) ) {
+		        return -3;
+		    }
+		    p->unsend_count++;
+		
+                    //printf("debug[%s:%d]: p->unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count);
+		    p->last_recv_seq = pkt->head.x_seq;
+
+		    want_sz = pkt->head.sz - PACKET_HEAD_SZ;
+                    putBytes( &(t->r_seg), pkt->data, &want_sz );
+		    justOutLine( &(p->prev_seglist) );
+		    
+		    t->r_stat = TUN_R_MOVE1;
+                }
+		else {
+                    printf("debug[%s:%d]: 提前收到的靠后的packet无法向buffer转移\n",  __FILE__, __LINE__);
+		    t->r_stat = TUN_R_INIT;
+		}
+		break;
         }
     }
 }
@@ -869,15 +887,18 @@ int stream( int mode, Pipe * p, int fd ) {
 			    before_sz - p->tun2fd.sz); 
             switch ( rt ) {
 		case 2: // end service
+	            p->flags |= P_FLG_TUN_FIN;
                     printf("Info[%s:%d]: end service\n", __FILE__, __LINE__); 
 		    return 32;
-                case 1: // buffer's remaining space maybe not enough
+                case 1: // 向tun2fd转移时卡住
                     //printf("debug[%s:%d]: buffer's remaining space maybe not enough\n", __FILE__, __LINE__); 
 	            return 31;
-                case 0: // 
+                case 0: // socket block
                     //printf("debug[%s:%d]: socket block\n", __FILE__, __LINE__); 
                     return 30;
-                case -1:// errors
+		case -1:// socket closed
+		    return 29;
+                case -2:// errors
                     printf("Error[%s:%d]: errors %d %s\n", __FILE__, __LINE__, errno, strerror(errno) ); 
 	            return -1;
 		default:
@@ -889,8 +910,8 @@ int stream( int mode, Pipe * p, int fd ) {
 	case P_STREAM_BUFF2TUN:
 	    printf("Info[%s:%d]: <-> BUFF2TUN\n", __FILE__, __LINE__); 
 	    
-	    if ( p->tun_closed == 'y' ) {
-	        return 40;
+	    if ( p->flags & P_FLG_TUN_FIN ) {
+	        return 49;
 	    }
 	    /* 这个模式下，是把buffer的数据写向各个tunnel fd。
 	     *
@@ -955,7 +976,7 @@ int isPipeListFull( PipeList * pl ) {
  *  >=0: 
  *   -1: full
  *   -2: memory not enough
- *   -3: code error
+ *  -66: code error
  */
 int getAEmptyPipe( PipeList * pl ) {
     int i;
@@ -972,11 +993,13 @@ int getAEmptyPipe( PipeList * pl ) {
 	    }
 	    pl->pipes[i].use = 1;
 	    pl->sz++;
-	    printf("==> empty pipe i=%d\n", i);
+	    //printf("==> empty pipe i=%d\n", i);
 	    return i;
 	}
     }
-    return -3;
+
+    printf("Fatal[%s:%d]: check codes\n", __FILE__, __LINE__ );
+    return -66;
 }
 
 /*

@@ -11,7 +11,6 @@ typedef struct client_thread_arg {
 }CTArg;
 
 // auth methods
-int doesNotAuthed( FdNode * );
 int authCli( FdNode *, PipeList *, int *, struct sockaddr_in, FdList * );
 //int authToServer( Pipe *, int );
 
@@ -19,5 +18,8 @@ void * client_pthread( void * );
 
 int set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x );
 int set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall);
+
+int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw );
+int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw );
 
 #endif

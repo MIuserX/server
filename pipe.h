@@ -31,9 +31,9 @@
 #define P_STREAM_FD2BUFF  (4)
 #define P_STREAM_END      (5)
 
-//#define P_SEG_HEAD  (1) //正在读packet的head
-//#define P_SEG_DATA  (2) //正在读packet的data
-//#define P_SEG_FULL  (3) //packet已读满，待向buffer转移
+#define P_FLG_TUN_FIN (0x00000001)
+#define P_FLG_FD_FIN  (0x00000002)
+#define P_FLG_REPUSH  (0x00000004) // 需要对方re push 数据
 
 
 typedef struct un_send_ack {
@@ -52,6 +52,7 @@ typedef struct pipe {
     pthread_t    pid;
 
     int          stat;
+    unsigned int flags;
     char         key[P_KEY_SZ]; // pipe 的唯一标识，
                                 // 提供相同 key 的tunnel 会被加入同一个tun list
     int          fd;            // pipe 的一端是一个 fd

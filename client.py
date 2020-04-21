@@ -16,7 +16,7 @@ def main_func():
     #port = 1085
     s.connect((host, port))
     s.send(sendstr)
-    time.sleep(1)
+    time.sleep(60)
     print(s.recv(1024))
     s.close()
 
