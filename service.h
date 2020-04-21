@@ -17,4 +17,7 @@ int authCli( FdNode *, PipeList *, int *, struct sockaddr_in, FdList * );
 
 void * client_pthread( void * );
 
+int set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x );
+int set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall);
+
 #endif

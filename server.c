@@ -124,88 +124,6 @@ int _accept_a_client( int listen_fd, ForEpoll * ep ) {
     return 0;
 }
 
-
-static int _set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
-    int i;
-
-    assert( p != NULL );
-    assert( ep != NULL );
-
-    // ! is_out && TRUE => set
-    // is_out && FALSE  => unset
-    if ( x ) { 
-	if ( !( p->fd_flags & FD_IS_EPOLLOUT ) ) {
-            ep->ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
-            ep->ev.data.fd = p->fd;
-            if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
-                dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-		return -1;
-            }
-    
-            p->fd_flags |= FD_IS_EPOLLOUT;
-	}
-    }
-    else {
-	if ( p->fd_flags & FD_IS_EPOLLOUT ) {
-            ep->ev.events = EPOLLIN | EPOLLET;
-            ep->ev.data.fd = p->fd;
-            if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
-                dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-		return -1;
-            }
-    
-            p->fd_flags &= ( ~FD_IS_EPOLLOUT );
-        }
-    }
-
-    return 0;
-}
-
-static int _set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall) {
-    int i;
-
-    assert( p != NULL );
-    assert( ep != NULL );
-
-    for ( i = 0; i < p->tun_list.len; i++ ) {
-	// ! is_out && TRUE => set
-	// is_out && FALSE  => unset
-	
-	// x                                             : 设置EPOLLOUT
-	// setall                                        : 所有fd都设置EPOLLOUT
-	// (p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) : fd遭遇write block
-	// !( p->tun_list.tuns[i].flags                  : 未监听EPOLLOUT
-        if ( !( p->tun_list.tuns[i].flags & FD_IS_EPOLLOUT ) && x && 
-			( setall || (p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) ) ) {
-            ep->ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
-            ep->ev.data.fd = p->tun_list.tuns[i].fd;
-            if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
-                dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-		return -1;
-            }
-
-            p->tun_list.tuns[i].flags |= FD_IS_EPOLLOUT;
-        }
-	
-	// !x                                              : 取消EPOLLOUT
-	// ! (p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) : fd未遭遇write block
-	// !( p->tun_list.tuns[i].flags & FD_IS_EPOLLOUT ) : 在监听EPOLLOUT
-        if ( ( p->tun_list.tuns[i].flags & FD_IS_EPOLLOUT ) && !x && 
-			( ! (p->tun_list.tuns[i].flags & FD_WRITE_BLOCK ) ) ) {
-            ep->ev.events = EPOLLIN | EPOLLET;
-            ep->ev.data.fd = p->tun_list.tuns[i].fd;
-            if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
-                dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-		return -1;
-            }
-
-            p->tun_list.tuns[i].flags &= ( ~FD_IS_EPOLLOUT );
-        }
-    }
-
-    return 0;
-}
-
 /*
  * == return ==
  *  0: ok
@@ -325,26 +243,26 @@ static int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	// 这时表示 merge fd 已 closed，
 	// 需要向 Tunnel 对端发送 FIN packet。
         printf("debug[%s:%d]: ENDING1 - all tunnel fds EPOLLOUT\n", __FILE__, __LINE__ );
-	if ( _set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
+	if ( set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
 	    return -1;
 	}
     }
     else if ( hasDataToTun( p ) ) {
         printf("debug[%s:%d]: set EPOLLOUT for all tunnel fds\n", __FILE__, __LINE__ );
-	if ( _set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
+	if ( set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
 	    return -1;
 	}
     }
     else if ( p->tun_list.sending_count > 0 ) {
         // 尝试为哪些碰到write block的fd设置EPOLLOUT
         printf("debug[%s:%d]: set EPOLLOUT for tunnel fds who met write-block\n", __FILE__, __LINE__ );
-	if ( _set_tun_out_listen( p, ep, TRUE, FALSE ) ) {
+	if ( set_tun_out_listen( p, ep, TRUE, FALSE ) ) {
 	    return -1;
 	}
     }
     else {
         printf("debug[%s:%d]: unset EPOLLOUT for tunnel fds\n", __FILE__, __LINE__ );
-	if ( _set_tun_out_listen( p, ep, TRUE, FALSE ) ) {
+	if ( set_tun_out_listen( p, ep, TRUE, FALSE ) ) {
 	    return -1;
 	}
     }
@@ -452,19 +370,19 @@ static int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     
     if ( p->stat == P_STAT_ENDING1 ) {
         printf("debug[%s:%d]: ENDING1 - all tunnel fds EPOLLOUT\n", __FILE__, __LINE__ );
-        if ( _set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
+        if ( set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
 	    return -1;
 	}
     }
     if ( ! isBuffEmpty( &(p->tun2fd) ) ) { 
         printf("debug[%s:%d]: merge EPOLLOUT on\n", __FILE__, __LINE__ );
-	if ( _set_fd_out_listen( p, ep, TRUE ) ) {
+	if ( set_fd_out_listen( p, ep, TRUE ) ) {
 	    return -1;
 	}
     }
     else {
         printf("debug[%s:%d]: merge EPOLLOUT off\n", __FILE__, __LINE__ );
-	if ( _set_fd_out_listen( p, ep, FALSE ) ) {
+	if ( set_fd_out_listen( p, ep, FALSE ) ) {
 	    return -1;
 	}
     }

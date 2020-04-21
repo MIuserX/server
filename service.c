@@ -17,6 +17,26 @@
 #include "server.h"
 #include "service.h"
 
+
+int cleanTunList( Pipe * p, ForEpoll * ep ) {
+    int i;
+
+    assert( p != NULL );
+    assert( ep != NULL );
+
+    for ( i = 0; i < p->tun_list.len; i++ ) {
+        ep->ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
+        ep->ev.data.fd = p->tun_list.tuns[i].fd;
+        if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
+            dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+
 static int _authToServer( Tunnel * , int *, int , Pipe * );
 
 /* 这函数要认证多个socket，
@@ -231,7 +251,7 @@ static void _set_fd_ET( Pipe * p, ForEpoll * ep ) {
 }
 */
 
-static void _set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
+int set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
     int i;
 
     assert( p != NULL );
@@ -245,7 +265,7 @@ static void _set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
             ep->ev.data.fd = p->fd;
             if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
                 dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-                client_pthread_exit( -2, p, ep );
+		return -1;
             }
     
             p->fd_flags |= FD_IS_EPOLLOUT;
@@ -257,7 +277,7 @@ static void _set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
             ep->ev.data.fd = p->fd;
             if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
                 dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-                client_pthread_exit( -2, p, ep );
+		return -1;
             }
     
             p->fd_flags &= ( ~FD_IS_EPOLLOUT );
@@ -265,7 +285,7 @@ static void _set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x ) {
     }
 }
 
-static void _set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall) {
+int set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall) {
     int i;
 
     assert( p != NULL );
@@ -285,7 +305,7 @@ static void _set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall) {
             ep->ev.data.fd = p->tun_list.tuns[i].fd;
             if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
                 dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-                client_pthread_exit( -2, p, ep );
+		return -1;
             }
 
             p->tun_list.tuns[i].flags |= FD_IS_EPOLLOUT;
@@ -300,7 +320,7 @@ static void _set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall) {
             ep->ev.data.fd = p->tun_list.tuns[i].fd;
             if ( epoll_ctl( ep->epoll_fd, EPOLL_CTL_MOD, ep->ev.data.fd, &(ep->ev) ) != 0 ) {
                 dprintf(2, "Error[%s:%d]: epoll_ctl failed, %s\n", __FILE__, __LINE__, strerror(errno) );
-                client_pthread_exit( -2, p, ep );
+		return -1;
             }
 
             p->tun_list.tuns[i].flags &= ( ~FD_IS_EPOLLOUT );
@@ -428,27 +448,29 @@ static void _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     
     if ( p->stat == P_STAT_ENDING1 ) {
         printf("debug[%s:%d]: ENDING1 - all tunnel fds EPOLLOUT\n", __FILE__, __LINE__ );
-	_set_tun_out_listen( p, ep, TRUE, TRUE );
+	rt = set_tun_out_listen( p, ep, TRUE, TRUE );
     }
     else if ( hasDataToTun( p ) ) {
         printf("debug[%s:%d]: set EPOLLOUT for all tunnel fds\n", __FILE__, __LINE__ );
-	_set_tun_out_listen( p, ep, TRUE, TRUE );
+	rt = set_tun_out_listen( p, ep, TRUE, TRUE );
     }
     else if ( p->tun_list.sending_count > 0 ) {
         // 尝试为哪些碰到write block的fd设置EPOLLOUT
         printf("debug[%s:%d]: set EPOLLOUT for tunnel fds who met write-block\n", __FILE__, __LINE__ );
-        _set_tun_out_listen( p, ep, TRUE, FALSE );
+        rt = set_tun_out_listen( p, ep, TRUE, FALSE );
     }
     else {
         printf("debug[%s:%d]: unset EPOLLOUT for tunnel fds\n", __FILE__, __LINE__ );
-	_set_tun_out_listen( p, ep, FALSE, FALSE );
+	rt = set_tun_out_listen( p, ep, FALSE, FALSE );
+    }
+    if ( rt == -1 ) {
+        client_pthread_exit( -2, p, ep );
     }
 }
 
 static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     char wblock = 'n';
     char rblock = 'n';
-    char bblock = 'n';
     int  rt;
 
     assert( p != NULL );
@@ -459,7 +481,8 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	printf("debug[%s:%d]: _relay_tun_to_fd > read tunnel fd\n", __FILE__, __LINE__ );
         rt = stream( P_STREAM_TUN2BUFF, p, evt_fd );
         switch ( rt ) {
-            case -1: // errors
+            case -2: // errors
+            case 29:
             case -66:
                 dprintf(2, "Error[%s:%d]: tunnel socket fd %d, errno=%d %s\n", 
                 		__FILE__, __LINE__, 
@@ -474,20 +497,13 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 		//   (2) 对端已向我方发送完了数据并收到了我方的ack
 		//
 		// 这时，我方仍需要将tun2fd的数据发送给我方的fd。
-		if ( hasDataToTun( p ) || p->tun_list.sending_count > 0 ) {
+		if ( hasActiveData( &(p->fd2tun) ) || p->tun_list.sending_count > 0 ) {
                     dprintf(2, "Error[%s:%d]: 还有数据未发送完毕，Tunnel对端结束\n", __FILE__, __LINE__ );
-		}
-		if ( p->prev_seglist.len > 0 ) {
-                    dprintf(2, "Error[%s:%d]: Tunnel对端结束，prev_seglist里还有数据\n", __FILE__, __LINE__ );
 		}
 		p->tun_closed = 'y';
 	    case 30: // socket block
 		rblock = 'y';
                 break;
-
-            case 31: // buffer空间可能不足，不读了
-                bblock = 'y';
-	        break;
         }
 
         //==== 向client fd写
@@ -504,15 +520,7 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
                     client_pthread_exit( -2, p, ep );
                     break;
 
-                case 22: // 消耗了tun2fd的bytes
-		    bblock = 'n';
-		    break;
-
                 case 21: // 消耗了tun2fd的bytes
-                    bblock = 'n';
-		    wblock = 'y';
-		    break;
-
                 case 20: // 未消耗tun2fd的bytes
                     wblock = 'y';
 	    	    break;
@@ -548,10 +556,7 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	     *   ! isBuffFull( p->fd2tun ) &&
 	     *   bblock == 'n'
 	     */
-	    if ( rblock == 'n' 
-		    && p->tun_closed == 'n' 
-		    && ( ! isBuffFull( &(p->tun2fd) ) ) 
-		    && bblock == 'n' ) {
+	    if ( rblock == 'n' && ( ! isBuffFull( &(p->tun2fd) ) ) ) {
 	        continue;
 	    }
 	    break;
@@ -563,18 +568,24 @@ static void _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	    break;
 	}
     }
-    
+   
     if ( p->stat == P_STAT_ENDING1 ) {
         printf("debug[%s:%d]: ENDING1 - all tunnel fds EPOLLOUT\n", __FILE__, __LINE__ );
-        _set_tun_out_listen( p, ep, TRUE, TRUE );
+        if ( set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
+            client_pthread_exit( -2, p, ep );
+	}
     }
+    rt = 0; 
     if ( ! isBuffEmpty( &(p->tun2fd) ) ) {
         printf("debug[%s:%d]: merge fd %d set EPOLLOUT\n", __FILE__, __LINE__, p->fd );
-	_set_fd_out_listen( p, ep, TRUE );
+	rt = set_fd_out_listen( p, ep, TRUE );
     }
     else {
         printf("debug[%s:%d]: merge fd %d unset EPOLLOUT\n", __FILE__, __LINE__, p->fd );
-	_set_fd_out_listen( p, ep, FALSE );
+	rt = set_fd_out_listen( p, ep, FALSE );
+    }
+    if ( rt == -1 ) {
+        client_pthread_exit( -2, p, ep );
     }
 }
 
@@ -717,7 +728,10 @@ void * client_pthread( void * p ) {
                         }
 
 			if ( ! isBuffEmpty( &(pp->fd2tun) ) ) {
-			    _set_tun_out_listen( pp, &ep, TRUE, TRUE );
+			    rt = set_tun_out_listen( pp, &ep, TRUE, TRUE );
+                            if ( rt == -1 ) { 
+				client_pthread_exit( -2, pp, &ep );
+			    }
 			}
 		    }
 		}
