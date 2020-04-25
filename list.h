@@ -1,17 +1,19 @@
 #ifndef __MY_LIST__
 #define __MY_LIST__
 
-//#include "common.h"
-#define P_SND_LIST_SZ (4)
+#include "common.h"
+//#define P_SND_LIST_SZ (4)
 
 // == initial values ==
+// idx = 0
+// seq = 0 (若seq为0，其他无效)
 // begin = 0
 // offset = 0 
-// seq = 0 (若seq为0，则begin和offset无效)
 typedef struct sending_packet {
+  int          idx; // 发送该包所用的tunnel在tunlist中的数组下标
+  unsigned int seq; // packet 的 seq
   size_t       begin; // 在buffer中的起始位置
   size_t       offset;// 字节数
-  unsigned int seq; // packet 的 seq
 } SendingPkt;
 
 // == initial values ==
@@ -33,7 +35,7 @@ void dumpSndList( SendingList * );
 int isSndListFull( SendingList * );
 int isSndListEmpty( SendingList * );
 
-void addSeq( SendingList *, unsigned int, size_t, size_t );
+void addSeq( SendingList *, int, unsigned int, size_t, size_t );
 void delSeq( SendingList *, unsigned int ); 
 
 #endif

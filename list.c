@@ -66,7 +66,7 @@ int isSndListEmpty( SendingList * l ) {
     return l->sending_cnt == 0;
 }
 
-void addSeq( SendingList * l, unsigned int seq, size_t begin, size_t offset ) {
+void addSeq( SendingList * l, int i, unsigned int seq, size_t begin, size_t offset ) {
     assert( l != NULL);
 
     // 由于发包是一个一个按顺序发的，
@@ -77,6 +77,7 @@ void addSeq( SendingList * l, unsigned int seq, size_t begin, size_t offset ) {
         l->head = l->tail;
     }
 
+    l->pkts[l->tail].idx = i;
     l->pkts[l->tail].seq = seq;
     l->pkts[l->tail].begin = begin;
     l->pkts[l->tail].offset = offset;
