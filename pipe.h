@@ -13,14 +13,12 @@
 #include "tunnel.h"
 #include "packet.h"
 
-#define B_INIT       0
-#define B_ACTIVE     2
-#define B_FIN_SENT   3
-#define B_FIN_RECVED 4
-
-#define P_STAT_ACTIVE  (31)
-#define P_STAT_ENDING  (32) // 我方 merge fd 已关闭，准备结束pipe
-#define P_STAT_END     (33) // 已发送FIN
+#define P_STAT_ACTIVE   (31)
+#define P_STAT_ENDING   (32) // 我方 merge fd 已关闭，准备结束pipe
+#define P_STAT_GOT_FIN  (33) // 收到FIN，准备结束pipe
+#define P_STAT_LAST_FIN (34) // 收到FIN，我方的merge fd也关闭了
+#define P_STAT_END      (35) // pipe可以结束
+#define P_STAT_BAD      (50) // pipe有问题，不能再用，结束pipe
 
 #define P_STREAM_BEGIN    (0)
 #define P_STREAM_BUFF2TUN (1)
@@ -29,9 +27,13 @@
 #define P_STREAM_FD2BUFF  (4)
 #define P_STREAM_END      (5)
 
-#define P_FLG_TUN_FIN (0x00000001)
-#define P_FLG_FD_FIN  (0x00000002)
-#define P_FLG_REPUSH  (0x00000004) // 需要对方re push 数据
+#define P_FLG_TUN_FIN  (0x00000001)
+#define P_FLG_FD_FIN   (0x00000002)
+#define P_FLG_REPUSH   (0x00000004) // 需要对方re push 数据
+#define P_FLG_SENDING  (0x00000008) // 存在tunnel fd处于write block状态
+#define P_FLG_DATA     (0x00000010) // tunnel 处于write block状态是因为在发真正的数据
+#define P_FLG_SEND_FIN (0x00000020) // 需要发送FIN 
+#define P_FLG_RECVING  (0x00000040) // 
 
 
 typedef struct un_send_ack {
@@ -54,6 +56,7 @@ typedef struct pipe {
     char         key[P_KEY_SZ]; // pipe 的唯一标识，
                                 // 提供相同 key 的tunnel 会被加入同一个tun list
     int          fd;            // pipe 的一端是一个 fd
+    void       * fd_fn;         // fd 对应的fdnode指针
     unsigned int fd_flags;
     time_t       fd_t;
     
@@ -65,18 +68,14 @@ typedef struct pipe {
     Buffer       tun2fd;
     Buffer       ap;
 
-    unsigned int last_send_seq; // 最后一个发送的sequence number
-    unsigned int last_send_ack; // 对方确认的最后一个sequence number
-    Line         prev_acklist;  // 提前收到的对方给的ack_list
-
+    unsigned int pkt_seq;    // the last seq number that added in SendingList
+    unsigned int byte_seq;
+    unsigned int last_recved_byte;
 
     // 接收数据相关的
     unsigned int last_recv_seq; // 最后一个收到的sequence number(数据被完全转移到tun2fd的才算)
     unsigned int last_recv_ack; // 给对方确认的最后一个sequence number    
 
-    int          unsend_count;     // 未发送给对方的ack数
-    Line         ack_sending_list; // 正在发送的ack 列表 
-    
     Line         prev_seglist;  // 
 } Pipe;
 
@@ -84,8 +83,9 @@ int initPipe( Pipe *, size_t, int );
 void cleanPipe( Pipe * );
 void destroyPipe( Pipe * );
 
-// connect to target used by server endpoint
-int connectFd( Pipe *, struct sockaddr_in );
+int hasPipeFd( Pipe * );
+void setPipeFd( Pipe * , int , void * );
+void unsetPipeFd( Pipe * );
 
 int hasUnSendAck( Pipe * );
 int hasDataToTun( Pipe * );

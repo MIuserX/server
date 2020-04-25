@@ -26,7 +26,8 @@
 #define P_BUFF_SZ (1024*1024)
 
 // 
-#define P_PREV_SEND_MAXSZ (8)
+#define P_SND_LIST_SZ (16)
+#define P_PREV_SEND_MAXSZ (16)
 
 // 乱序包最多缓存多少个。
 // 例如想要 5 号包，
@@ -43,7 +44,7 @@
 #define FD_CLOSED       (0x00000010) // fd closed
 #define FD_READ_BLOCK   (0x00000020) // fd遭遇read block
 #define FD_WRITE_BLOCK  (0x00000040) // fd遭遇write block
-#define FD_NO_WRITING   (0x00000080) // 对方merge fd 已关闭
+#define FD_FIN          (0x00000080) // [tunnel fd用] 对方merge fd 已关闭，不发实际数据
 #define FD_NO_READING   (0x00000100) // 
 
 #define FDNODE_BUFF     (0x10000000) // bf 申请了动态内存(关闭时需要释放)

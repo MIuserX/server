@@ -46,8 +46,8 @@ struct {
  *
  * == return ==
  *  0: ok
- * -1: sys errors, see errno
- * -2: service errors: 队列已满
+ * -1: errors
+ * -2: accept error
  */
 int _accept_a_client( int listen_fd, ForEpoll * ep ) {
     int                idx;
@@ -57,8 +57,9 @@ int _accept_a_client( int listen_fd, ForEpoll * ep ) {
 
     // accept 客户端连接
     if ( ( conn_fd = accept( listen_fd, (struct sockaddr *)&cliaddr, &len ) ) == -1 ) {
-        dprintf(2, "error[%s:%d]: set nonblocking failed, fd = %d\n", __FILE__, __LINE__, conn_fd );
-        return -1;
+        dprintf(2, "Error[%s:%d]: accept error - %s\n", 
+			__FILE__, __LINE__, strerror(errno) );
+        return -2;
     }
     printf( "Info[%s:%d]: fd=%d, client %s:%d \n", __FILE__, __LINE__, 
 		    conn_fd, inet_ntoa(cliaddr.sin_addr), cliaddr.sin_port );
@@ -72,9 +73,15 @@ int _accept_a_client( int listen_fd, ForEpoll * ep ) {
 
     // fd 加入 fd_list
     idx = addTunFd( &fd_list, conn_fd );
-    if ( idx == -1 ) {
-        close(conn_fd);
-        return -2;
+    switch ( idx ) {
+        case -1:
+            printf("Warning[%s:%d]: fd lis is full\n", __FILE__, __LINE__ );
+	    return -1;
+	case -2:
+            printf("Warning[%s:%d]: cannot get memory\n", __FILE__, __LINE__ );
+	    return -1;
+	case -66:
+	    return -66;
     }
 
     // 将 fd 加入 epoll 监听
@@ -104,171 +111,6 @@ int _del_fd( ForEpoll * ep, int fd ) {
     return 0;
 }
 
-/*void main_loop_v2( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
-    int                i;
-    int                rt;
-    int                fd;
-    int                ecode;
-    FdNode           * fd_node;
-    FdNode           * fn2;
-    int                timeout = -1;
-    unsigned int       flags = 0;
-
-    while ( 1 ) {
-	//==== 1) 阻塞在这里等待epoll事件
-	printf("debug: epoll_wait...\n");
-        if ( ( ep.wait_fds = epoll_wait( ep.epoll_fd, ep.evs, ep.fd_count, timeout ) ) == -1 ) {
-            dprintf( 2, "Epoll Wait Error: %s\n", strerror( errno ) );
-            exit( EXIT_FAILURE );
-        }
- 
-	//==== 2) 碰到epoll事件就处理事件
-	printf("debug: epoll events\n");
-        for ( i = 0; i < ep.wait_fds; i++ ) {
-	    // if listen_fd has events, accept
-            if ( ep.evs[i].data.fd == listen_fd && ep.fd_count < MAXEPOLL ) {
-                if ( _accept_a_client( listen_fd, &ep ) ) {
-                    dprintf( 2, "accept Error: %s\n", strerror( errno ) );
-                    exit( EXIT_FAILURE );
-		}
-		continue;
-	    }
-
-	    printf("debug[%s:%d]: event fd = %d\n", __FILE__, __LINE__, ep.evs[i].data.fd );
-            
-            fd_node = searchByFd( &fd_list, ep.evs[i].data.fd );
-            if ( ! fd_node ) {
-                dprintf(2, "Error: info of fd %d not found\n", ep.evs[i].data.fd );
-		continue;
-	    }
-
-	    // authytication
-            if ( fd_node->type == FD_TUN && doesNotAuthed( fd_node ) ) {
-	        printf("debug[%s:%d]: auth => go\n", __FILE__, __LINE__);
-                rt = authCli( fd_node, &plist, &ecode, mapping_addr, &fd_list );
-		switch ( rt ) {
-		    case  2:
-		       dprintf(2, "Error: auth failed, errcode=%d\n", ecode);
-		    case -3: // failed to allocate memory
-		    case -2: // (read) peer closed fd
-		    case -1: // read/write socket error
-		       dprintf(2, "Error[%s:%d]: auth error: %s\n", 
-				       __FILE__, __LINE__, 
-				       strerror(errno));
-		       fd = fd_node->fd;
-		       if ( _del_fd( &ep, fd ) ) {
-		           dprintf(2, "Error[%s:%d]: epoll_ctl_del error, %s\n", 
-					   __FILE__, __LINE__, strerror(errno));
-		       }
-		       delFd( &fd_list, fd_node->fd );
-		       printf("debug: fd %d has been deleted\n", fd);
-		       break;
-		    
-		    case 0: // socket block
-	               printf("debug[%s:%d]: auth => socket block\n", __FILE__, __LINE__);
-		       break;
-
-		    case 3: // auth successfully
-	                printf("debug[%s:%d]: auth => ok\n", __FILE__, __LINE__);
-                        fn2 = searchByFd( &fd_list, fd_node->p->fd );
-                        if ( fn2 && fn2->type == FD_MERGE1 ) {
-		            // 将 fd 加入 epoll 监听
-                            ep.ev.events = EPOLLIN | EPOLLET;
-                            ep.ev.data.fd = fn2->p->fd;
-                            if ( epoll_ctl( ep.epoll_fd, EPOLL_CTL_ADD, fn2->p->fd, &(ep.ev) ) < 0 ) {
-                                dprintf( 2, "Epoll Error: %s\n", strerror ( errno ) );
-                                exit( EXIT_FAILURE );
-                            }
-                            ++ep.fd_count;
-			    fn2->type = FD_MERGE;
-	                    printf("debug[%s:%d]: add mapping fd %d to epoll\n", __FILE__, __LINE__, fn2->p->fd);
-	                } else {
-	                    printf("debug[%s:%d]: mapping fd %d already in epoll\n", __FILE__, __LINE__, fn2->p->fd);
-			}
-		       break;
-
-		    default:
-		        dprintf(2, "Error[%s:%d]: unprobablely error rutern: %d, please check codes\n", __FILE__, __LINE__, rt);
-		}
-		continue;
-	    }
-
-            // transffer data from one edge to the other eage of pipe
-            if ( fd_node->type == FD_MERGE ) {
-		if ( ep.evs[i].events & EPOLLIN ) {
-	            printf("debug[%s:%d]: merge fd IN\n", __FILE__, __LINE__);
-		    if ( fd_node->p ) {
-		        rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
-	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                    // destroy fd_nodes
-	                    // destroy epoll
-	                    // destroy pipe 
-	                    break;
-	                }
-		    }
-		    else {
-	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
-		    }
-		}
-		if ( ep.evs[i].events & EPOLLOUT ) {
-	            printf("debug[%s:%d]: merge fd OUT\n", __FILE__, __LINE__);
-		    if ( fd_node->p ) {
-		        rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
-	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                    // destroy fd_nodes
-	                    // destroy epoll
-	                    // destroy pipe 
-	                    break;
-	                }
-		    }
-		    else {
-	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
-		    }
-		}
-	    }
-	    else if ( fd_node->type == FD_TUN ) {
-		if ( ep.evs[i].events & EPOLLIN ) {
-	            printf("debug[%s:%d]: tunnel fd IN\n", __FILE__, __LINE__);
-		    if ( fd_node->p ) {
-		        rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
-	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                    // destroy fd_nodes
-	                    // destroy epoll
-	                    // destroy pipe 
-	                    break;
-	                }
-		    }
-		    else {
-	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
-		    }
-		}
-		if ( ep.evs[i].events & EPOLLOUT ) {
-	            printf("debug[%s:%d]: tunnel fd OUT\n", __FILE__, __LINE__);
-		    if ( fd_node->p ) {
-		        rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
-	                if ( rt == -1 && _destroy_pipe( fd_node->p, &ep ) ) {
-	                    // destroy fd_nodes
-	                    // destroy epoll
-	                    // destroy pipe 
-	                    break;
-	                }
-		    }
-		    else {
-	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
-		    }
-		}
-	    }
-        }
-
-	//====
-	for ( i = 0; i < P_LIST_SZ; i++ ) {
-	    if ( plist.pipes[i].stat == P_STAT_END ) {
-	        _destroy_pipe( plist.pipes + i, &ep );
-	    }
-	}
-    }
-}*/
-
 /*
  * == desc ==
  * fdnode 的资源：
@@ -296,7 +138,7 @@ int try_free_fn( FdNode * fn, ForEpoll * ep ) {
                 exitTunList( &(fn->p->tun_list), fn->fd );
     	    }
     	    else {
-    	        fn->p->fd = -1;
+    	        unsetPipeFd( fn->p );
     	    }
     
             fn->p = NULL;
@@ -342,33 +184,25 @@ int try_free_pipe( Pipe * p, ForEpoll * ep ) {
     assert( p != NULL );
     assert( ep != NULL );
     
-    printf("Info[%s:%d]: pipe[%16s] end\n", __FILE__, __LINE__, p->key);
+    printf("debug[%s:%d]: free pipe[%16s]\n", __FILE__, __LINE__, p->key);
 
-    printf("debug[%s:%d]: clean merge fd %d\n", __FILE__, __LINE__, p->fd);
-    if ( p->fd >= 0 ) {
-        fn = searchByFd( &fd_list, p->fd );
-        if ( !fn ) {
-            printf("Fatal[%s:%d]: check codes\n", __FILE__, __LINE__);
-            return -66;
-	}
-	if ( try_free_fn( fn, ep ) ) {
+    if ( hasPipeFd( p ) ) {
+        printf("debug[%s:%d]: clean merge fd %d\n", __FILE__, __LINE__, p->fd);
+	if ( try_free_fn( (FdNode *)(p->fd_fn), ep ) ) {
 	    return -1;
 	}
+        unsetPipeFd( p );
     }
 
     for ( j = 0; j < p->tun_list.len; j++ ) {
-        if ( p->tun_list.tuns[j].fd != -1 ) {
+        if ( hasTunFd( p->tun_list.tuns + j ) ) {
             printf("debug[%s:%d]: clean tunnel fd %d\n", 
 			    __FILE__, __LINE__, 
 			    p->tun_list.tuns[j].fd);
-            fn = searchByFd( &fd_list, p->tun_list.tuns[j].fd );
-            if ( !fn ) {
-                printf("Fatal[%s:%d]: check codes\n", __FILE__, __LINE__);
-                return -66;
-            }
-            if ( try_free_fn( fn, ep ) ) {
-                return -1;
-            }
+	    if ( try_free_fn( (FdNode *)(p->tun_list.tuns[j].fd_fn), ep ) ) {
+	        return -1;
+	    }
+            unsetTunFd( p->tun_list.tuns + j );
         }
     }
     
@@ -417,7 +251,9 @@ void main_loop( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
 	     * 如果找不到 fdnode，就是程序逻辑有问题。
 	     *
 	     */
-	    //printf("debug[%s:%d]: event fd = %d\n", __FILE__, __LINE__, ep.evs[i].data.fd );
+	    printf("debug[%s:%d]: events loop - i=%d fd=%d\n", 
+			    __FILE__, __LINE__, 
+			    i, ep.evs[i].data.fd );
             fd_node = searchByFd( &fd_list, ep.evs[i].data.fd );
             if ( ! fd_node ) {
 	        printf("Fatal[%s:%d]: check codes\n", __FILE__, __LINE__);
@@ -435,6 +271,9 @@ void main_loop( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
 	        //printf("debug[%s:%d]: auth => go\n", __FILE__, __LINE__);
                 rt = authCli( fd_node, &plist, &ecode, mapping_addr, &fd_list );
 		switch ( rt ) {
+		    case -66:
+                        exit( EXIT_FAILURE );
+
 	            case -2:
 		        if ( try_free_pipe( fd_node->p, &ep ) ) {
 		            dprintf(2, "Error[%s:%d]: try_free_pipe failed\n", 
@@ -511,66 +350,11 @@ void main_loop( ForEpoll ep, int listen_fd, struct sockaddr_in mapping_addr ) {
 		continue;
 	    }
 
-            if ( isMergeFd( fd_node ) ) {
-		if ( ep.evs[i].events & EPOLLIN ) {
-	            printf("debug[%s:%d]: merge fd IN\n", __FILE__, __LINE__);
-		    if ( fd_node->p ) {
-		        rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
-	                if ( rt == -1 && try_free_pipe( fd_node->p, &ep ) ) {
-	                    break;
-	                }
-		    }
-		    else {
-	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
-		    }
-		}
-		if ( ep.evs[i].events & EPOLLOUT ) {
-	            printf("debug[%s:%d]: merge fd OUT\n", __FILE__, __LINE__);
-		    if ( fd_node->p ) {
-		        rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
-	                if ( rt == -1 && try_free_pipe( fd_node->p, &ep ) ) {
-	                    break;
-	                }
-		    }
-		    else {
-	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
-		    }
-		}
-	    }
-	    else {
-		if ( ep.evs[i].events & EPOLLIN ) {
-	            printf("debug[%s:%d]: tunnel fd IN\n", __FILE__, __LINE__);
-		    if ( fd_node->p ) {
-		        rt = _relay_tun_to_fd( fd_node->p, ep.evs[i].data.fd, &ep, 'r' );
-	                if ( rt == -1 && try_free_pipe( fd_node->p, &ep ) ) {
-	                    break;
-	                }
-		    }
-		    else {
-	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
-		    }
-		}
-		if ( ep.evs[i].events & EPOLLOUT ) {
-	            printf("debug[%s:%d]: tunnel fd OUT\n", __FILE__, __LINE__);
-		    if ( fd_node->p ) {
-		        rt = _relay_fd_to_tun( fd_node->p, ep.evs[i].data.fd, &ep, 'w' );
-	                if ( rt == -1 && try_free_pipe( fd_node->p, &ep ) ) {
-	                    break;
-	                }
-		    }
-		    else {
-	                printf("Error[%s:%d]: fd %d, p=NULL\n", __FILE__, __LINE__, fd_node->fd);
-		    }
-		}
+            rt = relay( fd_node->p, &ep, i, fd_node );
+	    if ( fd_node->p->stat == P_STAT_END || fd_node->p->stat == P_STAT_BAD ) {
+	        try_free_pipe( fd_node->p, &ep );
 	    }
         }
-
-	//====
-	for ( i = 0; i < P_LIST_SZ; i++ ) {
-	    if ( plist.pipes[i].stat == P_STAT_END ) {
-	        try_free_pipe( plist.pipes + i, &ep );
-	    }
-	}
     }
 }
 
@@ -603,7 +387,6 @@ int main(int argc, char *argv[]) {
 
     // destroy
     close( listen_fd );
-    close( ep.epoll_fd );
     destroyFdList( &fd_list );
     destroyPipeList( &plist );
 

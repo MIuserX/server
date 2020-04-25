@@ -66,7 +66,7 @@ int isSndListEmpty( SendingList * l ) {
     return l->sending_cnt == 0;
 }
 
-void addSeq( SendingList * l, int i, unsigned int seq, size_t begin, size_t offset ) {
+void addSeq( SendingList * l, int i, unsigned int seq, unsigned int byte_offset, size_t begin, size_t sz ) {
     assert( l != NULL);
 
     // 由于发包是一个一个按顺序发的，
@@ -79,8 +79,9 @@ void addSeq( SendingList * l, int i, unsigned int seq, size_t begin, size_t offs
 
     l->pkts[l->tail].idx = i;
     l->pkts[l->tail].seq = seq;
+    l->pkts[l->tail].byte_offset = byte_offset;
     l->pkts[l->tail].begin = begin;
-    l->pkts[l->tail].offset = offset;
+    l->pkts[l->tail].sz = sz;
 
     ( l->sending_cnt )++;
 }
@@ -89,9 +90,11 @@ void addSeq( SendingList * l, int i, unsigned int seq, size_t begin, size_t offs
  * == desc ==
  * 该函数不返回错误，外部程序负责正确的调用该函数。
  * 
- *
+ * == return ==
+ * >=0: next sending byte's index
+ *  -1: send all
  */
-void delSeq( SendingList * l, unsigned int seq ) {
+unsigned int delSeq( SendingList * l, unsigned int seq ) {
     unsigned int idx;
 
     assert( l != NULL);
@@ -105,14 +108,22 @@ void delSeq( SendingList * l, unsigned int seq ) {
 
     //== 如果删除的是head并且还有正在发送的包，
     //   将head移到下一个正在发送的包上
-    if ( idx == l->head && l->sending_cnt > 0 ) {
-        // 如果head后面还有在发的包，
-        // 把head设置为后面第一个还在发的包的下标。
-        while ( 1 ) {
-            l->head = nextPos( l->head ) ;
-            if ( l->pkts[l->head].seq > 0 ) {
-                break;
+    if ( idx == l->head ) { 
+        if ( l->sending_cnt > 0 ) {
+            // 如果head后面还有在发的包，
+            // 把head设置为后面第一个还在发的包的下标。
+            while ( 1 ) {
+                l->head = nextPos( l->head ) ;
+                if ( l->pkts[l->head].seq > 0 ) {
+                    break;
+                }
             }
         }
+        else {
+            // 如果发完了，返回1
+            return l->pkts[l->tail].end;
+        }
     }
+
+    return l->pkts[l->head].begin;
 }

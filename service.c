@@ -18,6 +18,37 @@
 #include "service.h"
 
 
+/* 为pipe的fd创建到 xx 的socket连接．
+ * 
+ * == param ==
+ * 
+ *
+ * == return ==
+ * >=0: fd
+ *  -1: see errno
+ */
+int connectFd( struct sockaddr_in to_addr ) {
+    int fd;
+
+    fd = socket( AF_INET, SOCK_STREAM, 0 );
+
+    if ( fd == -1 ) {
+        return -1;
+    }
+
+    if ( connect( fd, (struct sockaddr *)(&to_addr), sizeof(to_addr) ) == -1 ) {
+        close( fd );
+        return -1;
+    }
+    
+    if ( setnonblocking( fd ) ) {
+        close( fd );
+        return -1;
+    }
+
+    return fd;
+}
+
 int cleanTunList( Pipe * p, ForEpoll * ep ) {
     int i;
 
@@ -326,40 +357,57 @@ int set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall) {
     }
 }
 
-int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
-    char   wblock = 'n';
-    char   rblock = 'n';
-    int    rt;
+int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw, FdNode * fn ) {
+    char     wblock = 'n';
+    char     rblock = 'n';
+    int      rt;
+
+    assert( p != NULL );
+    assert( ep != NULL );
 
     while ( 1 ) {
-	printf("debug[%s:%d]: _relay_fd_to_tun read client fd\n", __FILE__, __LINE__ );
-        //==== 从client fd读
-	// 前提：
-	//   fd not closed
-	//
-	// 结果：
-	//   (1) buffer is full (socket non-block)
-	//   (2) socket block (buffer is not full)
+	printf("debug[%s:%d]: fd >>> tun - read merge fd\n", __FILE__, __LINE__ );
         rt = stream( P_STREAM_FD2BUFF, p, evt_fd );
         switch ( rt ) {
 	    case 2: // socket closed
-                if ( ! isBuffEmpty( &(p->tun2fd) ) ) {
-                    dprintf(2, "Error[%s:%d]: merge fd %d closed, but tun2fd has data", __FILE__, __LINE__, p->fd);
-		    return -1;
-	        }
+		if ( p->stat == P_STAT_ACTIVE ) {
+                    if ( ! isBuffEmpty( &(p->tun2fd) ) ) {
+                        dprintf(2, "Error[%s:%d]: merge fd %d closed, but tun2fd has data", 
+		    		    __FILE__, __LINE__, p->fd);
+			return -1;
+	            }
+		    if ( p->prev_seglist.len > 0 ) {
+                        dprintf(2, "Error[%s:%d]: merge fd %d closed, but prev_seglist has data", 
+		    		    __FILE__, __LINE__, p->fd);
+			return -1;
+		    }
+
+		    p->stat = P_STAT_ENDING;
+		    p->flags |= P_FLG_SEND_FIN;
+                    
+		    if ( fn ) {
+		        fn->flags |= FD_CLOSED;
+		    }
+		}
+		else if ( p->stat == P_STAT_GOT_FIN ) {
+		    p->stat = P_STAT_LAST_FIN;
+		    p->flags |= P_FLG_SEND_FIN;
+		    
+		    if ( fn ) {
+		        fn->flags |= FD_CLOSED;
+		    }
+		}
+	
             case 0: // socket block
                 rblock = 'y';
                 break;
 
-	    case -1:// errors
-                dprintf(2, "Error[%s:%d]: merge fd %d, errno=%d %s\n",
-                            __FILE__, __LINE__,
-                            evt_fd,
-                            errno, strerror(errno));
+	    case -1: // errors
+	    case -66:
 		return -1;
         }
     
-	printf("debug[%s:%d]: _relay_fd_to_tun write tunnel fds\n", __FILE__, __LINE__ );
+	printf("debug[%s:%d]: fd >>> tun - write tunnel fd\n", __FILE__, __LINE__ );
         //==== 往tunnels写
 	// 前提：
 	//   有数据可写：
@@ -375,18 +423,12 @@ int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
         rt = stream( P_STREAM_BUFF2TUN, p, evt_fd );
         switch ( rt ) {
             case -1: // 
-                dprintf(2, "Error[%s:%d]: client socket fd %d, errno=%d %s\n",
-                            __FILE__, __LINE__,
-                            evt_fd,
-                            errno, strerror(errno));
+            case -66:
 		return -1;
 
             case 40:
                 wblock = 'y'; //写不动了，有可能socket block，有可能到了未ack发包极限
                 break;
-
-            //case 41: 
-	    //
         }
 
         /* 处理 fd closed 的情况。
@@ -397,31 +439,23 @@ int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
          * 但作为一个中专，我们不管这些，我们只是关闭。
          *
          */
-        if ( p->fd_flags & FD_CLOSED ) { 
-	    if ( ( ! hasDataToTun( p ) ) 
-		    && ( p->tun_list.sending_count == 0 ) 
-		    && ( ! hasUnAckData( &(p->fd2tun) ) ) ) {
-		if ( p->stat == P_STAT_ACTIVE || p->stat == P_STAT_ENDING ) {
-                    printf("debug[%s:%d]: ENDING1 - will send FIN\n", __FILE__, __LINE__ );
-                    p->stat = P_STAT_ENDING1;
-		}
-	    }
-	    else {
-		if ( p->stat == P_STAT_ACTIVE ) {
-                    printf("debug[%s:%d]: ENDING - FIN waiting\n", __FILE__, __LINE__ );
-	            p->stat = P_STAT_ENDING;
-		}
+        if ( p->stat == P_STAT_ENDING ) { 
+	    if ( ( ! hasDataToTun( p ) )
+		    && ( !(p->flags & P_FLG_SENDING) ) ) {
+                p->stat = P_STAT_END;
+		break;
 	    }
         }
+	else if ( p->stat == P_STAT_LAST_FIN ) {
+	    //if ( ( ! hasDataToTun( p ) ) &&
+	}
 
-	/*
-        printf("debug[%s:%d]: why not ENDING ?\n", __FILE__, __LINE__ );
-        printf("debug[%s:%d]: fd2tun:\n", __FILE__, __LINE__ );
-	dumpBuff( &(p->fd2tun) );
-        printf("debug[%s:%d]: unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count );
-        printf("debug[%s:%d]: sending_count=%d\n", __FILE__, __LINE__, p->tun_list.sending_count );
-        printf("debug[%s:%d]: buff2segs.len=%d\n", __FILE__, __LINE__, p->fd2tun.buff2segs.len );
-        */
+        //printf("debug[%s:%d]: why not ENDING ?\n", __FILE__, __LINE__ );
+        //printf("debug[%s:%d]: fd2tun:\n", __FILE__, __LINE__ );
+	//dumpBuff( &(p->fd2tun) );
+        //printf("debug[%s:%d]: unsend_count=%d\n", __FILE__, __LINE__, p->unsend_count );
+        //printf("debug[%s:%d]: sending_count=%d\n", __FILE__, __LINE__, p->tun_list.sending_count );
+        //printf("debug[%s:%d]: buff2segs.len=%d\n", __FILE__, __LINE__, p->fd2tun.buff2segs.len );
 	
         if ( rw == 'r' ) { // client fd met read event
             /* 尽力把client fd读到block。
@@ -444,15 +478,11 @@ int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     }
     
     rt = 0;
-    if ( p->stat == P_STAT_ENDING1 ) {
-        printf("debug[%s:%d]: ENDING1 - all tunnel fds EPOLLOUT\n", __FILE__, __LINE__ );
-	rt = set_tun_out_listen( p, ep, TRUE, TRUE );
-    }
-    else if ( hasDataToTun( p ) ) {
+    if ( hasDataToTun( p ) ) {
         printf("debug[%s:%d]: all tunnel fds HOT\n", __FILE__, __LINE__ );
 	rt = set_tun_out_listen( p, ep, TRUE, TRUE );
     }
-    else if ( p->tun_list.sending_count > 0 ) {
+    else if ( p->flags & P_FLG_SENDING ) {
         // 尝试为哪些碰到write block的fd设置EPOLLOUT
         printf("debug[%s:%d]: wblock tunnel fds HOT\n", __FILE__, __LINE__ );
         rt = set_tun_out_listen( p, ep, TRUE, FALSE );
@@ -487,16 +517,37 @@ int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
                 		errno, strerror(errno));
 		return -1;
 
-            case 32: 
+            case 2: 
 		// Tunnel对端发送了FIN，证明：
 		//   (1) 对端的fd已关闭
 		//   (2) 对端已向我方发送完了数据并收到了我方的ack
 		//
 		// 这时，我方仍需要将tun2fd的数据发送给我方的fd。
-		if ( hasActiveData( &(p->fd2tun) ) || p->tun_list.sending_count > 0 ) {
-                    dprintf(2, "Error[%s:%d]: 还有数据未发送完毕，Tunnel对端结束\n", __FILE__, __LINE__ );
+		if ( p->stat == P_STAT_ACTIVE ) {
+		    
+		    if ( hasActiveData( &(p->fd2tun) ) ) { 
+		        dprintf(2, "Error[%s:%d]: fd2tun has active data, Tunnel got FIN\n", 
+					__FILE__, __LINE__ );
+			return -1;
+	            }
+		    else {
+		        if ( hasUnAckData( &(p->fd2tun) ) ) {
+			    cleanBuff( &(p->fd2tun) );
+			}
+		    }
+		    if ( (p->flags & P_FLG_SENDING) && ( p->flags & P_FLG_DATA ) ) {
+                        dprintf(2, "Error[%s:%d]: sending_count > 0, Tunnel got FIN\n", 
+					__FILE__, __LINE__ );
+		        return -1;
+		    }
+
+		    p->stat = P_STAT_GOT_FIN;
 		}
-		p->tun_closed = 'y';
+		else if ( p->stat == P_STAT_ENDING ) {
+		    
+		}
+		break;
+
 	    case 30: // socket block
 		rblock = 'y';
                 break;
@@ -522,6 +573,7 @@ int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
             }
 	}
 
+        /*
         if ( p->fd_flags & FD_CLOSED ) { 
 	    if ( ( ! hasDataToTun( p ) ) 
 		    && ( p->tun_list.sending_count == 0 ) 
@@ -537,7 +589,7 @@ int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	            p->stat = P_STAT_ENDING;
 		}
 	    }
-        }
+        }*/
 
 	if ( p->tun_closed == 'y' && isBuffEmpty( &(p->tun2fd) ) ) {
 	    p->stat = P_STAT_END;
@@ -564,7 +616,7 @@ int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
 	}
     }
    
-    if ( p->stat == P_STAT_ENDING1 ) {
+    if ( p->stat == P_STAT_ENDING ) {
         printf("debug[%s:%d]: ENDING1 - all tunnel fds EPOLLOUT\n", __FILE__, __LINE__ );
         if ( set_tun_out_listen( p, ep, TRUE, TRUE ) ) {
 	    return -1;
@@ -582,6 +634,68 @@ int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw ) {
     }
 
     return rt;
+}
+
+/* 
+ * 
+ * == return ==
+ * -1: error
+ *  0: ok
+ */
+int relay( Pipe * p, ForEpoll * ep, int i, FdNode * fn) {
+    assert( p != NULL );
+    assert( ep != NULL );
+    assert( fn != NULL );
+
+    if ( p->stat == P_STAT_END 
+            && p->stat == P_STAT_BAD ) {
+        return 0;
+    }
+
+    if ( ep->evs[i].data.fd == p->fd ) {
+        /*
+         * 如果 client fd 有了 read事件，就 fd2tun。
+         * 如果 client fd 有了write事件，就 tun2fd。
+         * 这俩处理不分先后。
+         *
+         */
+        if ( ep->evs[i].events & EPOLLIN ) {
+            printf("debug[%s:%d]: EVENT - merge fd r event\n", __FILE__, __LINE__ );
+            if ( _relay_fd_to_tun( p, ep->evs[i].data.fd, ep, 'r', fn ) ) {
+                return -1;
+    	    }
+        }
+        if ( p->stat == P_STAT_END 
+                && p->stat == P_STAT_BAD ) {
+            return 0;
+        }
+        if ( ep->evs[i].events & EPOLLOUT ) {
+            printf("debug[%s:%d]: EVENT - merge fd w event\n", __FILE__, __LINE__ );
+            if ( _relay_tun_to_fd( p, ep->evs[i].data.fd, ep, 'w' ) ) {
+                return -1;
+    	    }
+        }
+    }
+    else {
+        if ( ep->evs[i].events & EPOLLIN ) {
+            printf("debug[%s:%d]: EVENT - tunnel fd r event\n", __FILE__, __LINE__ );
+            if ( _relay_tun_to_fd( p, ep->evs[i].data.fd, ep, 'r' ) ) {
+                return -1;
+    	    }
+        }
+        if ( p->stat == P_STAT_END 
+                && p->stat == P_STAT_BAD ) {
+            return 0;
+        }
+        if ( ep->evs[i].events & EPOLLOUT ) {
+            printf("debug[%s:%d]: EVENT - tunnel fd w event\n", __FILE__, __LINE__ );
+            if ( _relay_fd_to_tun( p, ep->evs[i].data.fd, ep, 'w', fn ) ) {
+                return -1;
+    	    }
+        }
+    }
+
+    return 0;
 }
 
 void * client_pthread( void * p ) {
@@ -671,40 +785,9 @@ void * client_pthread( void * p ) {
             printf("debug[%s:%d]: loop[%d] fd=%d\n", __FILE__, __LINE__, i, ep.evs[i].data.fd );
             // 传递数据
             if ( auth_ok ) {
-                if ( ep.evs[i].data.fd == pp->fd ) {
-		    /*
-		     * 如果 client fd 有了 read事件，就 fd2tun。
-		     * 如果 client fd 有了write事件，就 tun2fd。
-		     * 这俩处理不分先后。
-		     *
-		     */
-		    if ( ep.evs[i].events & EPOLLIN ) {
-                        printf("debug[%s:%d]: merge fd r event\n", __FILE__, __LINE__ );
-	                if ( _relay_fd_to_tun( pp, ep.evs[i].data.fd, &ep, 'r' ) ) {
-			    service_exit( -2, pp, &ep );
-			}
-		    }
-		    if ( ep.evs[i].events & EPOLLOUT ) {
-                        printf("debug[%s:%d]: merge fd w event\n", __FILE__, __LINE__ );
-	                if ( _relay_tun_to_fd( pp, ep.evs[i].data.fd, &ep, 'w' ) ) {
-			    service_exit( -2, pp, &ep );
-			}
-		    }
-	        }
-	        else {
-		    if ( ep.evs[i].events & EPOLLIN ) {
-                        printf("debug[%s:%d]: tunnel fd r event\n", __FILE__, __LINE__ );
-	                if ( _relay_tun_to_fd( pp, ep.evs[i].data.fd, &ep, 'r' ) ) {
-			    service_exit( -2, pp, &ep );
-			}
-		    }
-		    if ( ep.evs[i].events & EPOLLOUT ) {
-                        printf("debug[%s:%d]: tunnel fd w event\n", __FILE__, __LINE__ );
-	                if ( _relay_fd_to_tun( pp, ep.evs[i].data.fd, &ep, 'w' ) ) {
-			    service_exit( -2, pp, &ep );
-			}
-		    }
-	        }
+                if ( relay( pp, &ep, i, NULL ) ) {
+                    service_exit( -2, pp, &ep );
+                }
 	    }
 	    else {
                 if ( ep.evs[i].data.fd == pp->fd ) {
@@ -767,6 +850,7 @@ int _new_service( FdNode * fn,
 		FdList * fl) {
     int          idx;
     int          fn_idx;
+    int          fd;
     AuthPacket * ap;
     Pipe       * new_p;
 
@@ -798,10 +882,10 @@ int _new_service( FdNode * fn,
     
 
     //==== service resource 2
-    if ( ( connectFd( new_p, mapping_addr ) ) != 0 ) {
+    if ( ( fd = connectFd( mapping_addr ) ) == -1 ) {
         delPipeByI( pl, idx );
         ap->code = (*ecode) = AUTH_SERV_ERR;
-        dprintf(2, "Error[%s:%d]: connect mapping addr failed, errno=%d, %s\n", 
+        dprintf(2, "Error[%s:%d]: connect mapping addr failed, errno=%d, errmsg=\"%s\"\n", 
         		__FILE__, __LINE__, errno, strerror(errno));
         return -1;
     }
@@ -822,12 +906,17 @@ int _new_service( FdNode * fn,
     fl->fds[fn_idx].p = new_p;
     fl->fds[fn_idx].flags |= FDNODE_AUTHED;
     
+    printf("debug[%s:%d]: merge fdnode idx=%d p=%p\n", 
+		    __FILE__, __LINE__,
+		    fn_idx, 
+		    fl->fds[fn_idx].p);
+    
     // 设置pipe数据
     memcpy( (void *)(new_p->key), (void *)(ap->key), P_KEY_SZ );
     new_p->stat = P_STAT_ACTIVE;
     
     // 关联fdnode与pipe
-    joinTunList( &(new_p->tun_list), fn->fd );
+    setPipeFd( new_p, fn->fd, (void *)fn );
     fn->p = new_p;
     fn->flags |= FDNODE_AUTHED;
     fn->flags |= FDNODE_ACT_NEW;
@@ -868,12 +957,12 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
     while ( 1 ) {
         switch ( fn->auth_status ) {
             case TUN_ACTIVE: // read auth packet
-                //printf("debug[%s:%d]: read auth packet => go\n", __FILE__, __LINE__);
+                printf("debug[%s:%d]: read auth packet => go\n", __FILE__, __LINE__);
                 want_sz = 0;
 		rt = putBytesFromFd( &(fn->bf), fn->fd, &want_sz );
                 if ( isBuffFull( &(fn->bf) ) ) {
             	    fn->auth_status = TUN_RECV_AP;
-                    //printf("debug[%s:%d]: read auth packet => ok\n", __FILE__, __LINE__);
+                    printf("debug[%s:%d]: read auth packet => ok\n", __FILE__, __LINE__);
                 }
 		else {
                     switch ( rt ) {
@@ -893,7 +982,7 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                 break;
             
             case TUN_RECV_AP: //==== auth
-                //printf("debug: auth packet => go\n");
+                printf("debug: auth packet => go\n");
                 *ecode = 0;
                 ap = (AuthPacket *)(fn->bf.buff);
                 p = searchPipeByKey( pl, ap->key );
@@ -914,11 +1003,13 @@ int authCli( FdNode * fn, PipeList * pl, int * ecode, struct sockaddr_in mapping
                         printf("Info[%s:%d]: join pipe, key=\"%16s\"\n", __FILE__, __LINE__, ap->key);
                         if ( ! p ) {
                             ap->code = (*ecode) = AUTH_NO_KEY;
+                            printf("Error[%s:%d]: key not exist\n", __FILE__, __LINE__);
 			    break;
                         }
 
 			//printf("p=%p\n", p);
-                    	if ( joinTunList( &(p->tun_list), fn->fd ) ) {
+                    	if ( joinTunList( &(p->tun_list), fn->fd, fn ) ) {
+                            printf("Error[%s:%d]: pipe tunlist is full\n", __FILE__, __LINE__);
                             ap->code = (*ecode) = AUTH_TUN_FULL;
                     	}
 			else {

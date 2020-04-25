@@ -1,16 +1,16 @@
 #ifndef __BUFFER_H__
 #define __BUFFER_H__
 
-#include "line.h"
+#include "list.h"
 
 #define BUFF_MD_ACK  ('1')
 #define BUFF_MD_2FD  ('2')
 
-typedef struct buffer_2_packet {
-    int          begin; // 
-    int          end;   // 
-    unsigned int seq;   // 发送该段数据的 packet sequence number
-} Buff2Seg;
+
+typedef struct buff_block {
+    unsigned int begin; // index of the first byte in buffer
+    unsigned int sz;    // 
+} BuffBlock;
 
 // == init ==
 // buff = NULL
@@ -23,13 +23,14 @@ typedef struct buffer_2_packet {
 // ack_begin = -1
 //
 typedef struct buffer {
-    char * buff;          //
-    size_t len;           // 
-    char   mode;
+    BuffBlock  * blks;
+    char       * buff;     // 
+    unsigned int len;      // the length of buff
+    char         mode;
 
-    size_t sz;            // the number of bytes in buff
-    int    begin;         // 活跃数据的第一个字节的下标
-    int    end;           // 活跃数据的最后一个字节的下标
+    size_t       sz;       // the number of bytes in buff
+    int          begin;    // 活跃数据的第一个字节的下标
+    int          end;      // 活跃数据的最后一个字节的下标
                           // 当head == tail时，看sz是否为0，
 			  // 若为0，则head 和 tail都无效,
 			  // 若不为0, 则head 和 tail 有效
@@ -40,7 +41,7 @@ typedef struct buffer {
     int    ack_begin;     // is the index of first byte of data that need ack.
                           // its initial value is -1 .
 			  // ack_begin is effective when more than -1 . 
-    Line   buff2segs;     // 
+    SendingList snd_list; //
 } Buffer;
 
 /* ==== BUFF_MD_ACK ====
@@ -92,31 +93,30 @@ typedef struct buffer {
  */
 
 
-int initBuff( Buffer *, size_t, char );
+int initBuff( Buffer *, unsigned int, char );
 void dumpBuff( Buffer * );
 void cleanBuff( Buffer * );
 void destroyBuff( Buffer * );
 
 int isBuffEmpty( Buffer * );
-int hasActiveData( Buffer * );
-int hasUnAckData( Buffer * );
 int isBuffFull( Buffer * );
 
-void setBuffSize( Buffer *, size_t );
-
 int putBytes( Buffer *, char *, size_t * );
-int putBytesFromBuff( Buffer *, Buffer *, size_t * );
-int putBytesFromFd( Buffer *, int, size_t * );
 
 // BUFF_MD_2FD
 int getBytes( Buffer *, char *, size_t * );
+int putBytesFromFd( Buffer *, int, size_t * );
 int getBytesToFd( Buffer *, int );
-int discardBytes( Buffer *, size_t * );
+void setBuffSize( Buffer *, size_t );
+void discardBytes( Buffer *, size_t );
 
 // BUFF_MD_ACK
-int preGetBytes( Buffer *, char *, size_t *, unsigned int );
-int backTo( Buffer *, unsigned int );
-int cancelLastPreGet( Buffer * );
-int ackBytes( Buffer *, unsigned int );
+int hasActiveData( Buffer * );
+int putBytesFromBuff( Buffer *, Buffer *, size_t * );
+int preGetBytesV2( Buffer *, char *, size_t *, int, unsigned int, unsigned int );
+int delBytes( Buffer *, unsigned int );
+void moveHead( Buffer *, unsigned int );
+//int backTo( Buffer *, unsigned int );
+//int cancelLastPreGet( Buffer * );
 
 #endif

@@ -19,7 +19,9 @@ void * client_pthread( void * );
 int set_fd_out_listen( Pipe * p, ForEpoll * ep, BOOL x );
 int set_tun_out_listen( Pipe * p, ForEpoll * ep, BOOL x, BOOL setall);
 
-int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw );
+int _relay_fd_to_tun( Pipe * p, int evt_fd, ForEpoll * ep, char rw, FdNode * fn );
 int _relay_tun_to_fd( Pipe * p, int evt_fd, ForEpoll * ep, char rw );
+
+int relay( Pipe * p, ForEpoll * ep, int i, FdNode * fn);
 
 #endif

@@ -12,12 +12,37 @@
 #include "tunnel.h"
 #include "packet.h"
 
+int hasTunFd( Tunnel * t ) {
+    assert( t != NULL );
+
+    return t->fd != -1;
+}
+
+void setTunFd( Tunnel * t, int fd, void * fn ) {
+    assert( t != NULL );
+    assert( fd >= 0 );
+
+    t->fd = fd;
+    t->fd_fn = fn;
+}
+
+void unsetTunFd( Tunnel * t ) {
+    assert( t != NULL );
+    t->fd = -1;
+    t->fd_fn = NULL;
+}
+
+int isTunActive( Tunnel * t ) {
+    assert( t != NULL );
+    return ( t->status == TUN_AUTHED || t->status == TUN_CLOSING );
+}
 
 int initTunnel( Tunnel * t ) {
     assert( t != NULL );
 
     bzero( (void *)(t->if_name), 36 );
     t->fd = -1;
+    t->fd_fn = NULL;
     t->flags = 0;
     t->status = TUN_INIT;
     t->r_stat = TUN_R_INIT;
@@ -27,11 +52,6 @@ int initTunnel( Tunnel * t ) {
     }
     if ( initBuff( &(t->w_seg), sizeof(Packet), BUFF_MD_2FD ) ) {
         destroyBuff( &(t->r_seg) );
-	return -1;
-    }
-    if ( initBuff( &(t->move_seg), TUN_BUFF_SZ, BUFF_MD_2FD ) ) {
-        destroyBuff( &(t->r_seg) );
-        destroyBuff( &(t->w_seg) );
 	return -1;
     }
     return 0;
@@ -44,13 +64,13 @@ int initTunnel( Tunnel * t ) {
 void destroyTunnel( Tunnel * t ) {
     assert( t != NULL );
 
-    if ( t->fd != -1 ) {
+    if ( hasTunFd( t ) ) {
         close( t->fd );
+        unsetTunFd( t );
     }
 
     destroyBuff( &(t->r_seg) );
     destroyBuff( &(t->w_seg) );
-    destroyBuff( &(t->move_seg) );
 }
 
 /*
@@ -131,7 +151,7 @@ int exitTunList( TunList * tun_list, int fd ) {
 
     for ( i = 0; i < tun_list->len; i++ ) {
         if ( tun_list->tuns[i].fd == fd ) {
-	    tun_list->tuns[i].fd = -1;
+	    unsetTunFd( tun_list->tuns + i );
 	    tun_list->tuns[i].status = TUN_INIT;
 	    tun_list->sz -= 1;
 	    return 0;
@@ -146,10 +166,11 @@ int exitTunList( TunList * tun_list, int fd ) {
  *  0: success
  * -1: tunnel list is full
  */
-int joinTunList( TunList * tun_list, int fd ) {
+int joinTunList( TunList * tun_list, int fd, void * fn ) {
     int i;
     
     assert( tun_list != NULL );
+    assert( fn != NULL );
     assert( fd >= 0 );
 
     //printf("===> tun_list.sz=%d tun_list.len=%d\n", tun_list->sz, tun_list->len);
@@ -159,7 +180,7 @@ int joinTunList( TunList * tun_list, int fd ) {
 
     for ( i = 0; i < tun_list->len; i++ ) {
         if ( tun_list->tuns[i].status == TUN_INIT ) {
-	    tun_list->tuns[i].fd = fd;
+	    setTunFd( tun_list->tuns + i, fd, fn );
 	    tun_list->tuns[i].status = TUN_AUTHED;
 	    tun_list->sz += 1;
 	    break;

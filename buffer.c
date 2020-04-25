@@ -123,24 +123,20 @@ static int nextWritePos( Buffer * b ) {
     return ( b->end + 1 ) % b->len;
 }
 
-int hasUnAckData( Buffer * b ) {
-    assert( b != NULL ); 
-
-    return ! isLineEmpty( &(b->buff2segs) );
-}
 
 /*
  * == return ==
  * -1 : failed to allocate memory
  *  0 : successfully
  */
-int initBuff( Buffer * b, size_t sz, char mode ) {
+int initBuff( Buffer * b, unsigned int nblks, char mode ) {
     assert( b != NULL );
-    assert( sz > 0 );
+    assert( nblks > 0 );
     assert( mode > '0' || mode < '3' );
 
     bzero( ( void *)b, sizeof( Buffer ) );
-    if ( ( b->buff = ( char *)malloc( sz ) ) == NULL ) {
+    if ( ( b->blks = ( BuffBlock *)malloc( ) ) == NULL ||
+        ( b->buff = ( char *)malloc( nblks * PACKET_DATA_SZ ) ) == NULL ) {
         return -1;
     }
 
@@ -148,7 +144,7 @@ int initBuff( Buffer * b, size_t sz, char mode ) {
     b->mode = mode;
     b->ack_begin = -1;
 
-    initLine( &(b->buff2segs) );
+    initSndList( (b->snd_list) );
     
     return 0;
 }
@@ -167,14 +163,15 @@ void dumpBuff( Buffer * b ) {
     }
     printf("  sz=%lu, begin=%d, end=%d\n", b->sz, b->begin, b->end);
     printf("  active_sz=%lu, ack_begin=%d\n", b->active_sz, b->ack_begin);
-    printf("  lenof(buff2segs)=%d\n", b->buff2segs.len);
+    printf("  snd_list:\n");
+    dumpSndList( &(b->snd_list) );
 }
 
 void cleanBuff( Buffer * b ) {
     assert( b != NULL );
      
     bzero( (void *)b->buff, b->len );
-    destroyLine( &(b->buff2segs) );
+    destroySndList( &(b->snd_list) );
     b->sz = 0;
     b->begin = 0;
     b->active_sz = 0;
@@ -196,7 +193,7 @@ void setBuffSize( Buffer * b, size_t sz ) {
 void destroyBuff( Buffer * b ) {
     assert( b != NULL );
     
-    destroyLine( &(b->buff2segs) );
+    destroySndList( &(b->snd_list) );
     if ( b->buff ) {
         free( b->buff );
     }
@@ -341,28 +338,21 @@ int getBytesToFd( Buffer * b, int fd ) {
  *  0: successfully
  * -1: buffer is empty
  */
-int discardBytes( Buffer * b, size_t * sz ) {
-    size_t tail_len;
-    size_t out_sz;
-
+void discardBytes( Buffer * b, size_t sz ) {
     assert( b != NULL );
-    assert( sz != NULL );
     assert( b->mode == BUFF_MD_2FD );
 
-    if ( isBuffEmpty( b ) ) {
-        return -1;
-    } else {
-	if ( ( *sz ) == 0 ) {
-	    *sz = b->sz;
-        } else { // ( *sz ) > 0
-            *sz = ( *sz ) <= b->sz ? ( *sz ) : b->sz;
+    if ( ! isBuffEmpty( b ) && sz > 0 ) {
+	if ( sz == 0 ) {
+	    sz = b->sz;
+        }
+        else { // sz > 0
+            sz = ( sz <= b->sz ? sz : b->sz );
 	}
 
-        b->begin = ( b->begin + ( *sz ) ) % b->len;
-        b->sz -= ( *sz );
+        b->begin = ( b->begin + sz ) % b->len;
+        b->sz -= sz;
     }
-
-    return 0;
 }
 
 /* 从buffer中返回数据。
@@ -451,71 +441,55 @@ int getBytes( Buffer * b, char * buff, size_t * sz ) {
     return 0;
 }
 
-/* 从buffer中返回数据，返回的数据并不
- *
+/* copy bytes from Buffer $b to destination $buff.
+ * Buffer doesn't delete these bytes until gets ack.
  *
  * == param ==
  * b :
  * buff : buffer to store returned bytes
  * sz : (in param) expected number of bytes
  *      (out param) the number of returned bytes
- *
- * == return ==
- *  0 : successfully
- * -2 : buffer is empty
- * -3 : inLine failed
  */
-int preGetBytes( Buffer * b, char * buff, size_t * sz, unsigned int seq ) {
+void preGetBytesV2( Buffer * b, char * buff, size_t * sz, int i, unsigned int seq, unsigned int offset ) {
     int      rt;
     int      tail_len;
-    Buff2Seg buff2seg;
 
     assert( b != NULL );
     assert( buff != NULL );
     assert( sz != NULL );
     assert( b->mode == BUFF_MD_ACK );
 
-    if ( isBuffEmpty( b ) ) {
-	// buffer is empty, do nothing
-        return -2;
-    } else {
+    if ( ! isBuffEmpty( b ) ) {
 	// not empty, so:
 	//   (1) b->sz > 0
 	//   (2) values of b->begin and b->end are valid
 	if ( ( *sz ) == 0 ) {
 	    *sz = b->active_sz;
-        } else { // ( *sz ) > 0
-            *sz = ( *sz ) <= b->active_sz ? ( *sz ) : b->active_sz;
+        } 
+        else { // ( *sz ) > 0
+            *sz = ( ( *sz ) <= b->active_sz ? ( *sz ) : b->active_sz );
 	}
 
-	// (1)
+	// (1) only one data field
 	// -------------------
 	// | | |X|X|X|X|X|X| |
 	// -------------------
         //      ^         ^
 	//      begin     end
 	//
-	// (2) 
+	// (2) two data fields
 	// -------------------
 	// |X|X|X| | | | |X|X|
 	// -------------------
         //      ^         ^
-	//      begin     end
-	//
-	// (3)
-	//                begin
-	//                v 
-	// -------------------
-	// | | | | | | | |X| |
-	// -------------------
-        //                ^
-	//                end
+	//      end       begin
 	//
 	if ( b->begin <= b->end ) {
-            // 这个if里处理上述的(1)和(3)
+            // case (1)
 	    memcpy( (void *)buff, b->buff + b->begin, *sz );
-	} else { // b->begin > b->end
-            // 这个else里处理上述的(2)，
+	}
+        else { // b->begin > b->end
+            // case (2)
 
 	    // 会有以下3种情况：
 	    // (1) 把begin到尾部的数据读了一部分
@@ -536,14 +510,8 @@ int preGetBytes( Buffer * b, char * buff, size_t * sz, unsigned int seq ) {
             b->ack_begin = b->begin;
 	}
         
-        // 加入ack队列
-	buff2seg.begin = b->begin;
-	buff2seg.end = ( b->begin + ( *sz ) - 1 ) % b->len;
-        buff2seg.seq = seq;
-        if ( rt = inLine( &(b->buff2segs), (void *)(&buff2seg) , sizeof(Buff2Seg) ) != 0 ) {
-	    dprintf(2, "Error(%s:%d): inLine failed, rt=%d\n", __FILE__, __LINE__, rt);
-	    return -3;
-	}
+        // add seq into snd_list
+        addSeq( &(b->snd_list), i, seq, offset, b->begin, ( b->begin + ( *sz ) - 1 ) % b->len );
 
 	// 调整begin和active_sz，新的数据取走了(被发送了)，
 	// active data 的起始标识begin需要向后移动，
@@ -554,8 +522,6 @@ int preGetBytes( Buffer * b, char * buff, size_t * sz, unsigned int seq ) {
 	    b->active_sz -= ( *sz );
 	}
     }
-
-    return 0;
 }
 
 int isBuffFull( Buffer * b ) {
@@ -1257,51 +1223,32 @@ int putBytesFromFd_ver1( Buffer * b, int fd ) {
 
 /*
  * == return ==
- *  0 : successfully
- * -2 : there are not unacknowdged bytes in buffer
- * -4 : the seq of line head is not equal to ack_seq
+ *  0: successfully
+ * -1: there are not unacknowdged bytes in buffer
  */
-int ackBytes( Buffer * b, unsigned int ack_seq ) {
-    Buff2Seg buff2seg;
-    int      rt;
+int delBytes( Buffer * b, unsigned int seq ) {
+    unsigned int rt;
     
     assert( b != NULL );
     assert( b->mode == BUFF_MD_ACK );
 
-    if ( b->ack_begin == -1 ) {
-        return -2;
+    if ( isSndListEmpty( &(p->snd_list) ) ) {
+        return -1;
     }
 
-    // empty line is the only reason which make getLineHead failed,
-    // now the line isn't empty, so this calling will be successful.
-    getLineHead( &(b->buff2segs) , (void *)(&buff2seg) );
-
-    // in expected situation, ack_seq should equal to seq of line heae, 
-    // if not, there must be something wrong.
-    if ( buff2seg.seq != ack_seq ) {
-        return -4;
-    }
+    rt = delSeq( &(b->snd_list), seq );
 
     // b->sz is length of [ack_begin, end].
     // when buffer is in ACK mode, 
     // ack func is the only one who can reduce value of buffer->sz, 
     // putBytes func is the only one who can increase value of buffer.sz.
-    b->sz -= lenOf( buff2seg.begin, buff2seg.end, b->len );
-    
-    // there are 2 cases:
-    //   (1) has data need be ack
-    //       => move ack_begin
-    //   (2) no data need be ack
-    //       => ack_begin = -1
-    if ( b->ack_begin != -1 ) {
-        b->ack_begin = ( buff2seg.end + 1 ) % b->len;
-    }
-    
-    // line is not empty, so error will not occur
-    outLine( &(b->buff2segs), (void *)(&buff2seg) );
-
-    if ( isLineEmpty( &(b->buff2segs) ) ) {
+    if ( isSndListEmpty( &(b->snd_list) ) ) {
+        b->sz -= lenOf( p->ack_begin, rt, b->len );
         b->ack_begin = -1;
+    }
+    else {
+        b->sz -= lenOf( p->ack_begin, rt, b->len ) - 1;
+        b->ack_begin = rt;
     }
 
     return 0;

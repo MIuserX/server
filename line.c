@@ -265,6 +265,36 @@ void * getHeadPtr( Line * l ) {
     return l->head->data;
 }
 
+/*
+unsigned int getMaxUnSendAck( Line * l ) {
+    LiNode tmp;
+    UnSendAck * cur;
+    UnSendAck * prev;
+    
+    assert( l != NULL );
+
+    if ( l->len == 1 ) {
+        ((UnSendAck *)(l->head->data))->sending = 'y';
+        return ((UnSendAck *)(l->head->data))->seq;
+    }
+    else {
+        tmp = l->head->next;
+        do {
+	    prev = (UnSendAck *)(tmp->prev->data);
+	    cur = (UnSendAck *)(tmp->data);
+            if ( prev->seq + 1 == cur->seq ) {
+		
+                tmp = tmp->next;
+	    }
+        } while ( tmp );
+	return cur->seq;
+    }
+}*/
+
+int outLineMany( Line * l ) {
+    return 0;
+}
+
 int justOutLine( Line * l ) {
     assert( l != NULL );
 
